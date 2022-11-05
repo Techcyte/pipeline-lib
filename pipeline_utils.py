@@ -1,11 +1,7 @@
 """
-PipelineElement(
-    inputs,# name: type_annotation mappings
-    outputs,# name: type_annotation mappings
-    constants,# e.g. config values. Please don't pass in actual configs
-    queues, # e.g. log, stop queues
-)
+
 """
+
 from dataclasses import dataclass
 from typing import Callable, Type, Optional, Dict, Any, List, Iterable, Union
 from multiprocessing import Queue
@@ -17,43 +13,10 @@ import pytest
 class PipelineTask:
     generator: Callable
     constants: Optional[Dict[str, Any]]=None
-    queues: Optional[Dict[str, Queue]]=None        
 
     @property
     def name(self):
         return self.generator.__name__
-
-# class Pipeline:
-#     def __init__(self, tasks=None):
-#         self.tasks = [] 
-#         if tasks is not None:
-
-    
-#     def add_element(self, 
-#         generator: Callable,
-#         input_type: Type,
-#         output_type: Type,
-#         constants: Optional[dict]=None,
-#         queues: Optional[dict]=None,
-#     ):
-#         """
-#         Adds element to the pipeline, does basic type checking
-#         """
-#         assert (input_type == None and self.tasks.len() == 0) or self.tasks[-1].output_type == input_type, \
-#             "Input type and previous output type must match exactly"
-
-#         self.tasks.append(PipelineTask(
-#             generator,
-#             input_type,
-#             output_type,
-#             constants,
-#             queues
-#         ))
-    
-#     def execute(self):
-#         """
-
-#         """
 
 
 def generate_numbers()->Iterable[int]:
@@ -283,10 +246,44 @@ def test_type_checks_valid():
 
 
 def execute(tasks: List[PipelineTask]):
-    
-    pass
+    """
+    execute tasks until final task completes. Garbage collector will 
+    clean up remainder of generators by raising a error
+    """
+    if not tasks:
+        return
+    type_check_tasks(tasks)
+    # type checking done at this point, now don't assume types all there
+
+    iterator = None
+    for task in tasks:
+        other_args = task.constants if task.constants else {}
+        if iterator is None:
+            iterator = task.generator(**other_args)
+        else:    
+            iterator = task.generator(iterator, **other_args)
 
 
-test_type_checks_valid()
+def task_execute():
+    tasks = [
+        PipelineTask(
+            generate_numbers,
+        ),
+        PipelineTask(
+            group_numbers,
+            constants={
+                "num_groups": 5
+            }
+        ),
+        PipelineTask(
+            sum_numbers,
+        ),
+        PipelineTask(
+            print_numbers,
+        )
+    ]
+    execute(tasks)
 
+
+task_execute()
 
