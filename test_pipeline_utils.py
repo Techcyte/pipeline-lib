@@ -1,4 +1,6 @@
 from pipeline_utils import *
+import pytest
+from typing import Union
 
 def generate_numbers()->Iterable[int]:
     for i in range(101):
@@ -105,6 +107,33 @@ def test_type_checks_valid():
     ]
     with pytest.raises(PipelineTypeError):
         type_check_tasks(needed_none_start)
+
+    with pytest.raises(PipelineTypeError):
+        type_check_tasks(mismatched_tasks)
+    none_in_middle = [
+        PipelineTask(
+            generate_numbers,
+        ),
+        PipelineTask(
+            print_numbers,
+        ),
+        PipelineTask(
+            generate_numbers,
+        ),
+        PipelineTask(
+            print_numbers,
+        )
+    ]
+    with pytest.raises(PipelineTypeError):
+        type_check_tasks(none_in_middle)
+
+    # needed_none_end = [
+    #     PipelineTask(
+    #         generate_numbers,
+    #     )
+    # ]
+    # with pytest.raises(PipelineTypeError):
+    #     type_check_tasks(needed_none_end)
 
     consts_present = [
         PipelineTask(
