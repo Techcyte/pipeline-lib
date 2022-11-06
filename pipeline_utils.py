@@ -8,11 +8,15 @@ from multiprocessing import Queue
 import inspect
 import typing
 import pytest
+import multiprocessing as mp
+import os
+
 
 @dataclass
 class PipelineTask:
     generator: Callable
     constants: Optional[Dict[str, Any]]=None
+    multiprocessing: bool = False
 
     @property
     def name(self):
@@ -59,13 +63,6 @@ class PipelineTypeError(RuntimeError):
 def type_error_if(condition, message):
     if not condition:
         raise PipelineTypeError(message)
-
-
-@dataclass 
-class PipelineTaskType:
-    input_type: Type
-    output_type: Type
-    other_names: List[str]
 
 
 def is_iterable(type: Type):
@@ -145,8 +142,9 @@ def type_check_tasks(tasks: List[PipelineTask]):
             raise PipelineTypeError(f"In task {task.name}, expected constants {other_args}, received constants {task_const_names}.")    
 
         prev_type = return_type
-    if prev_type is not None:
-        raise PipelineTypeError(f"Task {task.name} is the final task and must have output_type=None.")    
+
+    # final result can be an iterator or None, already checked by get_func_args
+    
 
 def test_type_checks_valid():
     tasks = [
@@ -187,13 +185,6 @@ def test_type_checks_valid():
     ]
     with pytest.raises(PipelineTypeError):
         type_check_tasks(needed_none_start)
-    needs_none_end = [
-        PipelineTask(
-            generate_numbers,
-        ),
-    ]
-    with pytest.raises(PipelineTypeError):
-        type_check_tasks(needs_none_end)
 
     consts_present = [
         PipelineTask(
@@ -245,6 +236,29 @@ def test_type_checks_valid():
         type_check_tasks(consts_added)
 
 
+def iter_connection(conn):
+    try:
+        while True:
+            yield conn.recv()
+    except EOFError:
+        # EOFError is expected on normal end of iteration
+        return
+
+def execute_child(in_pipe, generator, args, kwargs):
+    # inside the parent, populate the pipe with the generator
+    for item in generator(*args, **kwargs):
+        in_pipe.send(item)
+
+
+def multiprocess_executor(generator):
+    def executor_func(*args, **kwargs):
+        in_pipe, out_pipe = mp.Pipe()
+        childproc = mp.Process(target=execute_child, args=(in_pipe, generator, args, kwargs))
+        childproc.start()
+        return iter_connection(out_pipe)
+    return executor_func
+
+
 def execute(tasks: List[PipelineTask]):
     """
     execute tasks until final task completes. Garbage collector will 
@@ -252,19 +266,25 @@ def execute(tasks: List[PipelineTask]):
     """
     if not tasks:
         return
+
     type_check_tasks(tasks)
     # type checking done at this point, now don't assume types all there
 
     iterator = None
     for task in tasks:
         other_args = task.constants if task.constants else {}
+        generator = task.generator
+        if task.multiprocessing:
+            generator = multiprocess_executor(generator)
+
         if iterator is None:
-            iterator = task.generator(**other_args)
+            iterator = generator(**other_args)
         else:    
-            iterator = task.generator(iterator, **other_args)
+            iterator = generator(iterator, **other_args)
 
 
-def task_execute():
+
+def test_execute():
     tasks = [
         PipelineTask(
             generate_numbers,
@@ -285,5 +305,30 @@ def task_execute():
     execute(tasks)
 
 
-task_execute()
+def test_execute_multiprocessing():
+    tasks = [
+        PipelineTask(
+            generate_numbers,
+            multiprocessing=False,
+        ),
+        PipelineTask(
+            group_numbers,
+            constants={
+                "num_groups": 5
+            },
+            multiprocessing=True,
+        ),
+        PipelineTask(
+            sum_numbers,
+            multiprocessing=True,
+        ),
+        PipelineTask(
+            print_numbers,
+            multiprocessing=False,
+        )
+    ]
+    execute(tasks)
 
+
+if __name__ == "__main__":
+    test_execute_multiprocessing()
