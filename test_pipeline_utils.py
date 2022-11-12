@@ -210,22 +210,22 @@ def test_execute_multiprocessing():
     tasks = [
         PipelineTask(
             generate_numbers,
-            multiprocessing=True,
+            num_procs=1,
         ),
         PipelineTask(
             group_numbers,
             constants={
                 "num_groups": 5
             },
-            multiprocessing=False,
+            num_procs=1,
         ),
         PipelineTask(
             sum_numbers,
-            multiprocessing=True,
+            num_procs=1,
         ),
         PipelineTask(
             print_numbers,
-            multiprocessing=True,
+            num_procs=1,
         )
     ]
     execute(tasks)
@@ -262,15 +262,15 @@ def test_execute_multi_process_exception():
     tasks = [
         PipelineTask(
             generate_numbers,
-            multiprocessing=True,
+            num_procs=1,
         ),
         PipelineTask(
             raise_exception_fn,
-            multiprocessing=True,
+            num_procs=1,
         ),
         PipelineTask(
             print_numbers,
-            multiprocessing=True,
+            num_procs=1,
         )
     ]
     with pytest.raises(TestExpectedException):
