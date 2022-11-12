@@ -194,38 +194,13 @@ def test_execute():
             group_numbers,
             constants={
                 "num_groups": 5
-            }
-        ),
-        PipelineTask(
-            sum_numbers,
-        ),
-        PipelineTask(
-            print_numbers,
-        )
-    ]
-    execute(tasks)
-
-
-def test_execute_multiprocessing():
-    tasks = [
-        PipelineTask(
-            generate_numbers,
-            num_procs=1,
-        ),
-        PipelineTask(
-            group_numbers,
-            constants={
-                "num_groups": 5
             },
-            num_procs=1,
         ),
         PipelineTask(
             sum_numbers,
-            num_procs=1,
         ),
         PipelineTask(
             print_numbers,
-            num_procs=1,
         )
     ]
     execute(tasks)
@@ -242,7 +217,7 @@ def raise_exception_fn(arg: Iterable[int])->Iterable[int]:
     raise TestExpectedException()
 
 
-def test_execute_single_process_exception():
+def test_execute_exception():
     tasks = [
         PipelineTask(
             generate_numbers,
@@ -252,25 +227,6 @@ def test_execute_single_process_exception():
         ),
         PipelineTask(
             print_numbers,
-        )
-    ]
-    with pytest.raises(TestExpectedException):
-        execute(tasks)
-
-
-def test_execute_multi_process_exception():
-    tasks = [
-        PipelineTask(
-            generate_numbers,
-            num_procs=1,
-        ),
-        PipelineTask(
-            raise_exception_fn,
-            num_procs=1,
-        ),
-        PipelineTask(
-            print_numbers,
-            num_procs=1,
         )
     ]
     with pytest.raises(TestExpectedException):
@@ -278,4 +234,4 @@ def test_execute_multi_process_exception():
 
 
 if __name__ == "__main__":
-    test_execute_multi_process_exception()
+    test_execute_exception()
