@@ -23,8 +23,15 @@ def _consume_queue(queue: mp.Queue, upstream_proc_ids: List[int])->Iterable[Any]
             yield item
         except Empty:
             if all(_process_dead(id) for id in upstream_proc_ids):
-                # parents are all dead, never going to get any more data, exit quietly
+                # parents are all dead, never going to get any more data, 
+                # yield remaining data and exit quietly
                 # main process will handle any errors 
+                try:
+                    while True:
+                        yield queue.get_nowait()
+                except Empty:
+                    pass
+
                 return
 
 
