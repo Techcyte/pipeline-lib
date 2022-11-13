@@ -127,13 +127,26 @@ def test_type_checks_valid():
     with pytest.raises(PipelineTypeError):
         type_check_tasks(none_in_middle)
 
-    # needed_none_end = [
-    #     PipelineTask(
-    #         generate_numbers,
-    #     )
-    # ]
-    # with pytest.raises(PipelineTypeError):
-    #     type_check_tasks(needed_none_end)
+    last_is_not_none_tasks = [
+        PipelineTask(
+            generate_numbers,
+        )
+    ]
+    with pytest.raises(PipelineTypeError):
+        type_check_tasks(last_is_not_none_tasks, last_is_none=True)
+    type_check_tasks(last_is_not_none_tasks, last_is_none=False)
+
+    last_is_none_tasks = [
+        PipelineTask(
+            generate_numbers,
+        ),
+        PipelineTask(
+            print_numbers,
+        )
+    ]
+    with pytest.raises(PipelineTypeError):
+        type_check_tasks(last_is_none_tasks, last_is_none=False)
+    type_check_tasks(last_is_none_tasks, last_is_none=True)
 
     consts_present = [
         PipelineTask(
@@ -204,6 +217,24 @@ def test_execute():
         )
     ]
     execute(tasks)
+
+
+def test_execute_iter():
+    tasks = [
+        PipelineTask(
+            generate_numbers,
+            constants={},
+        ),
+        PipelineTask(
+            group_numbers,
+            constants={
+                "num_groups": 72
+            },
+        ),
+        PipelineTask(sum_numbers)
+    ]
+    results = list(yield_results(tasks))
+    assert results == [2556, 2494]
 
 
 class TestExpectedException(ValueError):
