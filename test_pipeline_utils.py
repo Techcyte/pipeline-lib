@@ -393,6 +393,33 @@ def test_many_workers_correctness():
     assert actual_result == expected_result
 
 
+def get_worker_pids(inpt: Iterable[int], process_set: set)->Iterable[int]:
+    pid = os.getpid()
+    for _ in inpt:
+        yield pid
+
+
+def test_many_workers_utilized():
+    """
+    Tests that many workers working on lots of data 
+    actually uses the different processes meaningfully
+    """
+    n_procs = 5
+    process_set = set()
+    tasks = [
+        PipelineTask(
+            generate_many,
+        ),
+        PipelineTask(
+            get_worker_pids,
+            constants={
+                "process_set": process_set,
+            },
+            num_procs=n_procs,
+        ),
+    ]
+    assert len(set(yield_results(tasks))) == n_procs
+
 
 if __name__ == "__main__":
-    test_many_workers_correctness()
+    test_many_workers_utilized()
