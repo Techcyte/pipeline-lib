@@ -1,10 +1,13 @@
+import os
 from pipeline_utils import *
 import pytest
 from typing import Union
 
+
 def generate_numbers()->Iterable[int]:
     for i in range(101):
         yield i
+
 
 def group_numbers(int_iterator: Iterable[int], num_groups: int)->Iterable[List[int]]:
     assert num_groups > 0
@@ -17,22 +20,20 @@ def group_numbers(int_iterator: Iterable[int], num_groups: int)->Iterable[List[i
     if cur_nums:
         yield cur_nums
 
+
 def sum_numbers(group_iterator: Iterable[List[int]])->Iterable[int]:
     for nums in group_iterator:
         yield sum(nums)
+
 
 def add_const(int_iter: Iterable[int], add_val: int)->Iterable[int]:
     for i in int_iter:
         yield i + add_val
 
+
 def print_numbers(num_iterator: Iterable[int])->None:
     for n  in num_iterator:
         print(n)
-
-# nums = generate_numbers(None)
-# num_groups = group_numbers(nums, 5)
-# sums = sum_numbers(num_groups)
-# print_numbers(sums)
 
 
 def test_get_func_args():
@@ -219,7 +220,7 @@ def test_execute():
     execute(tasks)
 
 
-def test_execute_iter():
+def test_yield_results():
     tasks = [
         PipelineTask(
             generate_numbers,
@@ -264,5 +265,81 @@ def test_execute_exception():
         execute(tasks)
 
 
+def sudden_exit_fn(arg: Iterable[int])->Iterable[int]:
+    # start up input generator/process
+    next(iter(arg))
+    # kills process via psutil so that python does not know about it
+    proc = psutil.Process(os.getpid())
+    proc.kill()
+
+
+def test_sudden_exit_middle():
+    tasks = [
+        PipelineTask(
+            generate_numbers,
+        ),
+        PipelineTask(
+            sudden_exit_fn,
+        ),
+        PipelineTask(
+            print_numbers,
+        )
+    ]
+    with pytest.raises(BadTaskExit):
+        execute(tasks)
+
+
+def test_sudden_exit_end():
+    tasks = [
+        PipelineTask(
+            generate_numbers,
+        ),
+        PipelineTask(
+            sudden_exit_fn,
+        )
+    ]
+    with pytest.raises(BadTaskExit):
+        list(yield_results(tasks))
+
+
+
+def only_error_if_second_proc(arg: Iterable[int], started_event: mp.Event)->Iterable[int]:
+    """
+    only exits if it is the first worker process to start up.
+    """
+    is_second_proc = started_event.is_set()
+    started_event.set()
+    if is_second_proc:
+        raise TestExpectedException()
+    else:
+        yield from arg
+
+
+def test_single_worker_error():
+    """
+    if one process dies and the others do not, then it should still raise an exception, 
+    as the dead process might have consumed an important message 
+    """
+    started_event = mp.Event()
+    tasks = [
+        PipelineTask(
+            generate_numbers,
+        ),
+        PipelineTask(
+            only_error_if_second_proc,
+            constants={
+                "started_event": started_event,
+            },
+            num_procs=2
+        ),
+        PipelineTask(
+            print_numbers,
+            num_procs=2
+        )
+    ]
+    with pytest.raises(TestExpectedException):
+        execute(tasks)
+
+
 if __name__ == "__main__":
-    test_execute_exception()
+    test_single_worker_error()
