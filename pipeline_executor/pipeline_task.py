@@ -4,6 +4,9 @@ from typing import Callable, Optional, Dict, Any
 
 @dataclass
 class PipelineTask:
+    """
+    Definition of a task to place in the pipeline
+    """
     generator: Callable
     constants: Optional[Dict[str, Any]]=None
     num_procs: int = 1

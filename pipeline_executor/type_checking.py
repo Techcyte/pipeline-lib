@@ -12,7 +12,7 @@ class PipelineTypeError(RuntimeError):
     pass
 
 
-def type_error_if(condition, message):
+def _type_error_if(condition, message):
     if not condition:
         raise PipelineTypeError(message)
 
@@ -23,18 +23,18 @@ def is_iterable(type: Type):
 
 def get_func_args(func):
     arguments = inspect.getfullargspec(func)
-    type_error_if(arguments.varargs is None, "varargs not supported")
-    type_error_if(arguments.varkw is None, "varkw not supported")
-    type_error_if(arguments.defaults is None, "default arguments not supported")
-    type_error_if(arguments.kwonlydefaults is None, "default arguments not supported")
-    type_error_if(set(arguments.args + arguments.kwonlyargs).issubset(arguments.annotations), "all arguments must have annotations")
-    type_error_if('return' in arguments.annotations, "function return type must have type annotation")
+    _type_error_if(arguments.varargs is None, "varargs not supported")
+    _type_error_if(arguments.varkw is None, "varkw not supported")
+    _type_error_if(arguments.defaults is None, "default arguments not supported")
+    _type_error_if(arguments.kwonlydefaults is None, "default arguments not supported")
+    _type_error_if(set(arguments.args + arguments.kwonlyargs).issubset(arguments.annotations), "all arguments must have annotations")
+    _type_error_if('return' in arguments.annotations, "function return type must have type annotation")
     
     base_input_type = None if not arguments.args else arguments.annotations[arguments.args[0]]
     base_return_type = arguments.annotations['return']
 
-    type_error_if(base_input_type is None or (is_iterable(base_input_type) and len(typing.get_args(base_input_type)) == 1), "First argument must be an Iterable[input_type], if defined")
-    type_error_if(base_return_type is None or (is_iterable(base_return_type) and len(typing.get_args(base_return_type)) == 1), "Return type annotation must be an Iterable[input_type] or None")
+    _type_error_if(base_input_type is None or (is_iterable(base_input_type) and len(typing.get_args(base_input_type)) == 1), "First argument must be an Iterable[input_type], if defined")
+    _type_error_if(base_return_type is None or (is_iterable(base_return_type) and len(typing.get_args(base_return_type)) == 1), "Return type annotation must be an Iterable[input_type] or None")
 
     input_type = None if base_input_type is None else typing.get_args(base_input_type)[0]
     return_type = None if base_return_type is None else typing.get_args(base_return_type)[0]
@@ -70,7 +70,7 @@ def type_check_tasks(tasks: List[PipelineTask], last_is_none: bool = True):
         if set(task_consts) != set(other_args):
             raise PipelineTypeError(f"In task {task.name}, expected constants {other_args}, received constants {task_const_names}.")    
 
-        sanity_check_mp_params(task)
+        _sanity_check_mp_params(task)
 
         prev_type = return_type
 
@@ -81,11 +81,13 @@ def type_check_tasks(tasks: List[PipelineTask], last_is_none: bool = True):
         raise PipelineTypeError(f"In final task {task.name}, expected iterator output, actual type {prev_type}.")   
 
 
-def sanity_check_mp_params(task: PipelineTask):
+def _sanity_check_mp_params(task: PipelineTask):
     if task.num_procs <= 0:
         raise PipelineTypeError(f"In task {task.name}, num_procs value {task.num_procs} needs to be positive")
+
     if task.num_procs > mp.cpu_count():
         warnings.warn(f"In task {task.name}, num_procs value {task.num_procs} was greater than number of cpus on machine {mp.cpu_count()}")
+
     if task.out_buffer_size <= 0:
         raise PipelineTypeError(f"In task {task.name}, out_buffer_size {task.num_procs} needs to be positive")
 
