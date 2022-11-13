@@ -62,7 +62,6 @@ def test_get_func_args():
         get_func_args(return_not_iterable)
 
 
-
 def test_is_iterable():
     assert is_iterable(Iterable[str])
     assert not is_iterable(Optional[str])
@@ -88,6 +87,9 @@ def test_type_checks_valid():
         )
     ]
     type_check_tasks(tasks)
+
+
+def test_mismatched_task_types():
     mismatched_tasks = [
         PipelineTask(
             generate_numbers,
@@ -101,6 +103,9 @@ def test_type_checks_valid():
     ]
     with pytest.raises(PipelineTypeError):
         type_check_tasks(mismatched_tasks)
+    
+    
+def test_needed_none_start():
     needed_none_start = [
         PipelineTask(
             print_numbers,
@@ -109,8 +114,7 @@ def test_type_checks_valid():
     with pytest.raises(PipelineTypeError):
         type_check_tasks(needed_none_start)
 
-    with pytest.raises(PipelineTypeError):
-        type_check_tasks(mismatched_tasks)
+def test_non_in_middle():
     none_in_middle = [
         PipelineTask(
             generate_numbers,
@@ -128,6 +132,8 @@ def test_type_checks_valid():
     with pytest.raises(PipelineTypeError):
         type_check_tasks(none_in_middle)
 
+
+def test_last_is_not_none_task_check():
     last_is_not_none_tasks = [
         PipelineTask(
             generate_numbers,
@@ -137,6 +143,8 @@ def test_type_checks_valid():
         type_check_tasks(last_is_not_none_tasks, last_is_none=True)
     type_check_tasks(last_is_not_none_tasks, last_is_none=False)
 
+
+def test_last_is_none_task_check():
     last_is_none_tasks = [
         PipelineTask(
             generate_numbers,
@@ -149,6 +157,8 @@ def test_type_checks_valid():
         type_check_tasks(last_is_none_tasks, last_is_none=False)
     type_check_tasks(last_is_none_tasks, last_is_none=True)
 
+
+def test_consts_present_check():
     consts_present = [
         PipelineTask(
             generate_numbers,
@@ -165,6 +175,8 @@ def test_type_checks_valid():
     ]
     type_check_tasks(consts_present)
 
+
+def test_consts_missing_check():
     consts_missing = [
         PipelineTask(
             generate_numbers,
@@ -180,6 +192,8 @@ def test_type_checks_valid():
     with pytest.raises(PipelineTypeError):
         type_check_tasks(consts_missing)
 
+
+def test_consts_added_check():
     consts_added = [
         PipelineTask(
             generate_numbers,
@@ -341,5 +355,44 @@ def test_single_worker_error():
         execute(tasks)
 
 
+def generate_many()->Iterable[int]:
+    yield from range(30000)
+
+
+def test_many_workers_correctness():
+    """
+    Tests that many workers working on lots of data 
+    eventually returns the correct result, without packet loss or exceptions
+    """
+    started_event = mp.Event()
+    tasks = [
+        PipelineTask(
+            generate_many,
+        ),
+        PipelineTask(
+            add_const,
+            constants={
+                "add_val": 5,
+            },
+            num_procs=4,
+        ),
+        PipelineTask(
+            group_numbers,
+            constants={
+                "num_groups": 10
+            },
+            num_procs=4,
+        ),
+        PipelineTask(
+            sum_numbers,
+            num_procs=4,
+        )
+    ]
+    actual_result = sum(yield_results(tasks))
+    expected_result = 450135000
+    assert actual_result == expected_result
+
+
+
 if __name__ == "__main__":
-    test_single_worker_error()
+    test_many_workers_correctness()

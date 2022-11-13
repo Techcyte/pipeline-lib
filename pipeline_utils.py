@@ -74,6 +74,13 @@ def type_check_tasks(tasks: List[PipelineTask], last_is_none: bool = True):
         if prev_type != input_type:
             raise PipelineTypeError(f"In task {task.name}, expected input {input_type}, received input {prev_type}.")   
 
+        if task_idx == 0 and task.num_procs != 1:
+            raise PipelineTypeError(
+                f"Only supports 1 process for the first task in a pipeline, "
+                "due to difficulties reasoning about exit conditions, but "
+                " {task.num_procs} processes requested. "
+            )
+
         if task_idx != len(tasks) - 1 and return_type is None:
             raise PipelineTypeError(f"None return type only allowed in final task of pipe")
 
@@ -115,8 +122,8 @@ def consume_queue(queue: mp.Queue, upstream_proc_ids: List[int])->Iterable[Any]:
             item = queue.get(block=True, timeout=0.05)
             yield item
         except Empty:
-            if any(process_dead(id) for id in upstream_proc_ids):
-                # upstream might have died, and is not going to send us completely dependable data, exit quietly
+            if all(process_dead(id) for id in upstream_proc_ids):
+                # parents are all dead, never going to get any more data, exit quietly
                 # main process will handle any errors 
                 return
 
@@ -179,10 +186,14 @@ def cleanup_children(processes: List[mp.Process], err_queue: mp.Queue):
         raise err
     
     if any(proc.exitcode != 0 for proc in processes):
-        raise BadTaskExit(
-            f"Process {proc.name} exited with code {proc.exitcode} but did not raise an error, "
-            "likely was caused by a segfault in a c library"
-        )
+        messages = []
+        for proc in processes:
+            if proc.exitcode != 0:
+                messages.append(
+                    f"Process {proc.name} exited with code {proc.exitcode} but did not raise an error, "
+                    "likely was caused by a segfault in a c library.\n"
+                )
+        raise BadTaskExit("".join(messages))
 
 
 def start_tasks(tasks: List[PipelineTask]) -> Tuple[List[mp.Process], List[int], mp.Queue, mp.Queue]:
@@ -203,7 +214,7 @@ def start_tasks(tasks: List[PipelineTask]) -> Tuple[List[mp.Process], List[int],
 
         upstream_queue = downstream_queue 
         upstream_proc_ids = cur_proc_ids
-    
+
     final_proc_ids = cur_proc_ids
     return processes, final_proc_ids, upstream_queue, err_queue
 
@@ -219,7 +230,7 @@ def execute(tasks: List[PipelineTask]):
 
     type_check_tasks(tasks, last_is_none=True)
 
-    processes, final_pids, upstream_queue, err_queue = start_tasks(tasks)
+    processes, final_pids, _, err_queue = start_tasks(tasks)
 
     # wait for all consumer processes to finish
     while True:
@@ -245,6 +256,7 @@ def yield_results(tasks: List[PipelineTask]) -> Iterable[Any]:
 
     processes, final_pids, upstream_queue, err_queue = start_tasks(tasks)
 
-    yield from consume_queue(upstream_queue, final_pids)
-
-    cleanup_children(processes, err_queue)
+    try:
+        yield from consume_queue(upstream_queue, final_pids)
+    finally:
+        cleanup_children(processes, err_queue)
