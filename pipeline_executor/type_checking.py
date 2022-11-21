@@ -21,7 +21,7 @@ def is_iterable(type: Type):
     return typing.get_origin(type) is typing.get_origin(Iterable)
 
 
-def get_func_args(func):
+def get_func_args(func, extract_first=True):
     arguments = inspect.getfullargspec(func)
     _type_error_if(arguments.varargs is None, "varargs not supported")
     _type_error_if(arguments.varkw is None, "varkw not supported")
@@ -30,7 +30,7 @@ def get_func_args(func):
     _type_error_if(set(arguments.args + arguments.kwonlyargs).issubset(arguments.annotations), "all arguments must have annotations")
     _type_error_if('return' in arguments.annotations, "function return type must have type annotation")
     
-    base_input_type = None if not arguments.args else arguments.annotations[arguments.args[0]]
+    base_input_type = None if not arguments.args or not extract_first else arguments.annotations[arguments.args[0]]
     base_return_type = arguments.annotations['return']
 
     _type_error_if(base_input_type is None or (is_iterable(base_input_type) and len(typing.get_args(base_input_type)) == 1), "First argument must be an Iterable[input_type], if defined")
@@ -42,7 +42,7 @@ def get_func_args(func):
     # these are guarentteed to be mutually exclusive
     other_argument_names = arguments.args + arguments.kwonlyargs
     # remove input argument
-    if arguments.args:
+    if arguments.args and extract_first:
         other_argument_names.remove(arguments.args[0])
 
     return input_type, return_type, other_argument_names
@@ -51,7 +51,7 @@ def get_func_args(func):
 def type_check_tasks(tasks: List[PipelineTask], last_is_none: bool = True):
     prev_type = None
     for task_idx, task in enumerate(tasks):
-        input_type, return_type, other_args = get_func_args(task.generator)
+        input_type, return_type, other_args = get_func_args(task.generator, extract_first=(task_idx != 0))
         if prev_type != input_type:
             raise PipelineTypeError(f"In task {task.name}, expected input {input_type}, received input {prev_type}.")   
 

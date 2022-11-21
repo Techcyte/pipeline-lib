@@ -1,5 +1,5 @@
 import pytest
-from typing import Union, Optional
+from typing import Dict, Union, Optional
 
 from .example_funcs import *
 
@@ -15,6 +15,7 @@ def test_get_func_args():
     def kwarg_func(x: Iterable[int], arg2: float, *, arg3: str)->Iterable[str]:
         pass
     assert get_func_args(kwarg_func) == (int, str, ['arg2', 'arg3'])
+    assert get_func_args(kwarg_func, extract_first=False) == (None, str, ['x','arg2', 'arg3'])
 
     # errors
     with pytest.raises(PipelineTypeError):
@@ -84,6 +85,24 @@ def test_needed_none_start():
     ]
     with pytest.raises(PipelineTypeError):
         type_check_tasks(needed_none_start)
+
+
+def start_with_consts(beginning: Dict[int, str])->Iterable[int]:
+    pass
+
+
+def test_start_with_consts():
+    # check that first function can accept constant arguments in its first argument
+    start_with_consts_t = [
+        PipelineTask(
+            start_with_consts,
+            constants={
+                "beginning": {1: "bob"}
+            }
+        )
+    ]
+    type_check_tasks(start_with_consts_t, last_is_none=False)
+
 
 def test_non_in_middle():
     none_in_middle = [
