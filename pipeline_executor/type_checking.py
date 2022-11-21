@@ -28,7 +28,7 @@ def get_func_args(func, extract_first=True):
     _type_error_if(arguments.defaults is None, "default arguments not supported")
     _type_error_if(arguments.kwonlydefaults is None, "default arguments not supported")
     _type_error_if(set(arguments.args + arguments.kwonlyargs).issubset(arguments.annotations), "all arguments must have annotations")
-    _type_error_if('return' in arguments.annotations, "function return type must have type annotation")
+    _type_error_if('return' in arguments.annotations, "function return type must have type annotation, if not returning, please specify ->None")
     
     base_input_type = None if not arguments.args or not extract_first else arguments.annotations[arguments.args[0]]
     base_return_type = arguments.annotations['return']

@@ -33,7 +33,7 @@ def remap_results(model_results: Iterable[np.array], classmap: Dict[int, str])->
         yield (result_class, result_confidence)
 
 
-def aggregate_results(classes: Iterable[Tuple[str, float]]):
+def aggregate_results(classes: Iterable[Tuple[str, float]])->None:
     results = list(classes)
     class_stats = Counter(clas for clas, conf in results)
     print(class_stats)
