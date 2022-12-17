@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from typing import Type, List, Iterable
 import inspect
 import typing
@@ -48,7 +47,7 @@ def get_func_args(func, extract_first=True):
     return input_type, return_type, other_argument_names
 
 
-def type_check_tasks(tasks: List[PipelineTask], last_is_none: bool = True):
+def type_check_tasks(tasks: List[PipelineTask]):
     prev_type = None
     for task_idx, task in enumerate(tasks):
         input_type, return_type, other_args = get_func_args(task.generator, extract_first=(task_idx != 0))
@@ -74,11 +73,8 @@ def type_check_tasks(tasks: List[PipelineTask], last_is_none: bool = True):
 
         prev_type = return_type
 
-    if last_is_none and prev_type is not None:
+    if prev_type is not None:
         raise PipelineTypeError(f"In final task {task.name}, expected output type None, actual type {prev_type}.")   
-
-    if not last_is_none and prev_type is None:
-        raise PipelineTypeError(f"In final task {task.name}, expected iterator output, actual type {prev_type}.")   
 
 
 def _sanity_check_mp_params(task: PipelineTask):

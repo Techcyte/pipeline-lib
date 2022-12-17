@@ -1,9 +1,8 @@
 from collections import Counter
 import torch
+from torch import nn
 import urllib
-import tempfile
 from PIL import Image
-import shutil
 import numpy as np
 from typing import Iterable, Tuple, Dict, List
 from pipeline_executor import execute, PipelineTask
@@ -19,10 +18,9 @@ def run_model(img_data: Iterable[np.array], model_source: str, model_name: str)-
 def load_images(imgs: List[str])->Iterable[np.array]:
     for img in imgs:
         with urllib.request.urlopen(img) as response:
-            img_bytes = response.read()
-            img_pil = Image.open(img_bytes, formats=["JPEG"])
+            img_pil = Image.open(response, formats=["JPEG"])
             img_numpy = np.array(img_pil)
-            yield img_pil
+            yield img_numpy
 
 
 def remap_results(model_results: Iterable[np.array], classmap: Dict[int, str])->Iterable[Tuple[str, float]]:

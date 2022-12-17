@@ -91,6 +91,10 @@ def start_with_consts(beginning: Dict[int, str])->Iterable[int]:
     pass
 
 
+def sink_ints(vals: Iterable[int])->None:
+    list(vals)
+
+
 def test_start_with_consts():
     # check that first function can accept constant arguments in its first argument
     start_with_consts_t = [
@@ -99,9 +103,12 @@ def test_start_with_consts():
             constants={
                 "beginning": {1: "bob"}
             }
+        ),
+        PipelineTask(
+            sink_ints
         )
     ]
-    type_check_tasks(start_with_consts_t, last_is_none=False)
+    type_check_tasks(start_with_consts_t)
 
 
 def test_non_in_middle():
@@ -130,8 +137,7 @@ def test_last_is_not_none_task_check():
         )
     ]
     with pytest.raises(PipelineTypeError):
-        type_check_tasks(last_is_not_none_tasks, last_is_none=True)
-    type_check_tasks(last_is_not_none_tasks, last_is_none=False)
+        type_check_tasks(last_is_not_none_tasks)
 
 
 def test_last_is_none_task_check():
@@ -143,9 +149,7 @@ def test_last_is_none_task_check():
             print_numbers,
         )
     ]
-    with pytest.raises(PipelineTypeError):
-        type_check_tasks(last_is_none_tasks, last_is_none=False)
-    type_check_tasks(last_is_none_tasks, last_is_none=True)
+    type_check_tasks(last_is_none_tasks)
 
 
 def test_consts_present_check():

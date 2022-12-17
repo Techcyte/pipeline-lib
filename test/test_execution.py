@@ -2,11 +2,24 @@ import os
 import pytest
 from typing import Union
 import multiprocessing as mp
+import pickle
 import psutil
 
 from .example_funcs import *
 
-from pipeline_executor import PipelineTask, execute, yield_results, BadTaskExit
+from pipeline_executor import PipelineTask, execute, BadTaskExit
+
+
+TEMP_FILE = "/tmp/pipeline_pickle"
+
+def save_results(vals: Iterable[int])->None:
+    with open(TEMP_FILE, 'wb') as file:
+        pickle.dump(list(vals), file)
+
+
+def load_results():
+    with open(TEMP_FILE, 'rb') as file:
+        return pickle.load(file)
 
 
 def test_execute():
@@ -28,24 +41,6 @@ def test_execute():
         )
     ]
     execute(tasks)
-
-
-def test_yield_results():
-    tasks = [
-        PipelineTask(
-            generate_numbers,
-            constants={},
-        ),
-        PipelineTask(
-            group_numbers,
-            constants={
-                "num_groups": 72
-            },
-        ),
-        PipelineTask(sum_numbers)
-    ]
-    results = list(yield_results(tasks))
-    assert results == [2556, 2494]
 
 
 class TestExpectedException(ValueError):
@@ -106,10 +101,13 @@ def test_sudden_exit_end():
         ),
         PipelineTask(
             sudden_exit_fn,
+        ),
+        PipelineTask(
+            save_results
         )
     ]
     with pytest.raises(BadTaskExit):
-        list(yield_results(tasks))
+        execute(tasks)
 
 
 
@@ -182,9 +180,13 @@ def test_many_workers_correctness():
         PipelineTask(
             sum_numbers,
             num_procs=4,
+        ),
+        PipelineTask(
+            save_results
         )
     ]
-    actual_result = sum(yield_results(tasks))
+    execute(tasks)
+    actual_result = sum(load_results())
     expected_result = 450135000
     assert actual_result == expected_result
 
@@ -213,8 +215,12 @@ def test_many_workers_utilized():
             },
             num_procs=n_procs,
         ),
+        PipelineTask(
+            save_results
+        )
     ]
-    assert len(set(yield_results(tasks))) == n_procs
+    execute(tasks)
+    assert len(set(load_results())) == n_procs
 
 
 if __name__ == "__main__":

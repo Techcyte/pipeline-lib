@@ -126,7 +126,7 @@ def _start_tasks(tasks: List[PipelineTask]) -> Tuple[List[mp.Process], List[int]
         upstream_proc_ids = cur_proc_ids
 
     final_proc_ids = cur_proc_ids
-    return processes, final_proc_ids, upstream_queue, err_queue
+    return processes, final_proc_ids, err_queue
 
 
 def execute(tasks: List[PipelineTask]):
@@ -138,9 +138,9 @@ def execute(tasks: List[PipelineTask]):
     if not tasks:
         return
 
-    type_check_tasks(tasks, last_is_none=True)
+    type_check_tasks(tasks)
 
-    processes, final_pids, _, err_queue = _start_tasks(tasks)
+    processes, final_pids, err_queue = _start_tasks(tasks)
 
     # wait for all consumer processes to finish
     while True:
@@ -150,23 +150,3 @@ def execute(tasks: List[PipelineTask]):
         time.sleep(0.05)
 
     _cleanup_children(processes, err_queue)
-
-
-def yield_results(tasks: List[PipelineTask]) -> Iterable[Any]:
-    """
-    execute tasks and yields results to user 
-    Raises error if tasks are inconsistently specified or if 
-    one of the tasks raises an error. 
-    """
-
-    if not tasks:
-        return
-
-    type_check_tasks(tasks, last_is_none=False)
-
-    processes, final_pids, upstream_queue, err_queue = _start_tasks(tasks)
-
-    try:
-        yield from _consume_queue(upstream_queue, final_pids)
-    finally:
-        _cleanup_children(processes, err_queue)
