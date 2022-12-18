@@ -1,0 +1,59 @@
+workflow:
+  rules:
+    - # if we have a merge request
+      if: $CI_OPEN_MERGE_REQUESTS && $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: always
+
+    - # if the commit message includes the text "ci run"
+      if: $CI_COMMIT_MESSAGE =~ /ci run/
+      when: always
+
+    - # if the commit is on main branch
+      if: $CI_COMMIT_BRANCH == 'main'
+      when: always
+
+    - # otherwise, don't run pipelines
+      when: never
+
+
+default:
+  tags:
+    - hub
+  retry:
+    max: 2
+    # https://docs.gitlab.com/ee/ci/yaml/#retrywhen
+    # By specifying these three codes, we can retry only when GitLab has an issue
+    when:
+      - unknown_failure
+      - api_failure
+      - runner_system_failure
+
+stages:
+  - lint
+  - test
+  - publish
+
+lint:
+  stage: lint
+  interruptible: true
+  script:
+    - docker build . -t dataset_builder
+    - docker run --rm dataset_builder bash scripts/lint.sh
+
+unit-test:
+  stage: test
+  interruptible: true
+  script:
+    - docker build  . -t dataset_builder
+    - docker run --rm dataset_builder bash scripts/test.sh
+  needs: []
+
+publish-wheel:
+  stage: publish
+  # uploads very quickly all at end, interrupts will generally be during build, and should be fine
+  interruptible: true
+  script:
+    - docker build . -t dataset_builder
+    - docker run --rm -e TWINE_PASSWORD=${CI_JOB_TOKEN} -e TWINE_USERNAME=gitlab-ci-token -e REPOSITORY_URL=${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi -t dataset_builder bash scripts/publish_package.sh
+  only:
+    - main
