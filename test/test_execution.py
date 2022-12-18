@@ -1,24 +1,25 @@
-import os
-import pytest
-from typing import Union
 import multiprocessing as mp
+import os
 import pickle
+from typing import Union
+
 import psutil
+import pytest
+
+from pipeline_executor import BadTaskExit, PipelineTask, execute
 
 from .example_funcs import *
 
-from pipeline_executor import PipelineTask, execute, BadTaskExit
-
-
 TEMP_FILE = "/tmp/pipeline_pickle"
 
-def save_results(vals: Iterable[int])->None:
-    with open(TEMP_FILE, 'wb') as file:
+
+def save_results(vals: Iterable[int]) -> None:
+    with open(TEMP_FILE, "wb") as file:
         pickle.dump(list(vals), file)
 
 
 def load_results():
-    with open(TEMP_FILE, 'rb') as file:
+    with open(TEMP_FILE, "rb") as file:
         return pickle.load(file)
 
 
@@ -29,16 +30,14 @@ def test_execute():
         ),
         PipelineTask(
             group_numbers,
-            constants={
-                "num_groups": 5
-            },
+            constants={"num_groups": 5},
         ),
         PipelineTask(
             sum_numbers,
         ),
         PipelineTask(
             print_numbers,
-        )
+        ),
     ]
     execute(tasks)
 
@@ -47,7 +46,7 @@ class TestExpectedException(ValueError):
     pass
 
 
-def raise_exception_fn(arg: Iterable[int])->Iterable[int]:
+def raise_exception_fn(arg: Iterable[int]) -> Iterable[int]:
     # start up input generator/process
     i1 = next(iter(arg))
     yield i1
@@ -64,13 +63,13 @@ def test_execute_exception():
         ),
         PipelineTask(
             print_numbers,
-        )
+        ),
     ]
     with pytest.raises(TestExpectedException):
         execute(tasks)
 
 
-def sudden_exit_fn(arg: Iterable[int])->Iterable[int]:
+def sudden_exit_fn(arg: Iterable[int]) -> Iterable[int]:
     # start up input generator/process
     next(iter(arg))
     # kills process via psutil so that python does not know about it
@@ -88,7 +87,7 @@ def test_sudden_exit_middle():
         ),
         PipelineTask(
             print_numbers,
-        )
+        ),
     ]
     with pytest.raises(BadTaskExit):
         execute(tasks)
@@ -102,16 +101,15 @@ def test_sudden_exit_end():
         PipelineTask(
             sudden_exit_fn,
         ),
-        PipelineTask(
-            save_results
-        )
+        PipelineTask(save_results),
     ]
     with pytest.raises(BadTaskExit):
         execute(tasks)
 
 
-
-def only_error_if_second_proc(arg: Iterable[int], started_event: mp.Event)->Iterable[int]:
+def only_error_if_second_proc(
+    arg: Iterable[int], started_event: mp.Event
+) -> Iterable[int]:
     """
     only exits if it is the first worker process to start up.
     """
@@ -125,8 +123,8 @@ def only_error_if_second_proc(arg: Iterable[int], started_event: mp.Event)->Iter
 
 def test_single_worker_error():
     """
-    if one process dies and the others do not, then it should still raise an exception, 
-    as the dead process might have consumed an important message 
+    if one process dies and the others do not, then it should still raise an exception,
+    as the dead process might have consumed an important message
     """
     started_event = mp.Event()
     tasks = [
@@ -138,24 +136,21 @@ def test_single_worker_error():
             constants={
                 "started_event": started_event,
             },
-            num_procs=2
+            num_procs=2,
         ),
-        PipelineTask(
-            print_numbers,
-            num_procs=2
-        )
+        PipelineTask(print_numbers, num_procs=2),
     ]
     with pytest.raises(TestExpectedException):
         execute(tasks)
 
 
-def generate_many()->Iterable[int]:
+def generate_many() -> Iterable[int]:
     yield from range(30000)
 
 
 def test_many_workers_correctness():
     """
-    Tests that many workers working on lots of data 
+    Tests that many workers working on lots of data
     eventually returns the correct result, without packet loss or exceptions
     """
     started_event = mp.Event()
@@ -172,18 +167,14 @@ def test_many_workers_correctness():
         ),
         PipelineTask(
             group_numbers,
-            constants={
-                "num_groups": 10
-            },
+            constants={"num_groups": 10},
             num_procs=4,
         ),
         PipelineTask(
             sum_numbers,
             num_procs=4,
         ),
-        PipelineTask(
-            save_results
-        )
+        PipelineTask(save_results),
     ]
     execute(tasks)
     actual_result = sum(load_results())
@@ -191,7 +182,7 @@ def test_many_workers_correctness():
     assert actual_result == expected_result
 
 
-def get_worker_pids(inpt: Iterable[int], process_set: set)->Iterable[int]:
+def get_worker_pids(inpt: Iterable[int], process_set: set) -> Iterable[int]:
     pid = os.getpid()
     for _ in inpt:
         yield pid
@@ -199,7 +190,7 @@ def get_worker_pids(inpt: Iterable[int], process_set: set)->Iterable[int]:
 
 def test_many_workers_utilized():
     """
-    Tests that many workers working on lots of data 
+    Tests that many workers working on lots of data
     actually uses the different processes meaningfully
     """
     n_procs = 5
@@ -215,9 +206,7 @@ def test_many_workers_utilized():
             },
             num_procs=n_procs,
         ),
-        PipelineTask(
-            save_results
-        )
+        PipelineTask(save_results),
     ]
     execute(tasks)
     assert len(set(load_results())) == n_procs

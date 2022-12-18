@@ -1,3 +1,3 @@
+from .execution import BadTaskExit, execute
 from .pipeline_task import PipelineTask
-from .execution import execute, BadTaskExit
-from .type_checking import type_check_tasks, PipelineTypeError
+from .type_checking import PipelineTypeError, type_check_tasks

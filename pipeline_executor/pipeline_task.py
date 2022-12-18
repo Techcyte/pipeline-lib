@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Callable, Optional, Dict, Any
+from typing import Any, Callable, Dict, Optional
 
 
 @dataclass
@@ -7,8 +7,9 @@ class PipelineTask:
     """
     Definition of a task to place in the pipeline
     """
+
     generator: Callable
-    constants: Optional[Dict[str, Any]]=None
+    constants: Optional[Dict[str, Any]] = None
     num_procs: int = 1
     out_buffer_size: int = 4
 
