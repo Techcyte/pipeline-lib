@@ -11,24 +11,24 @@ from pipeline_executor import PipelineTask, execute
 
 
 def run_model(
-    img_data: Iterable[np.array], model_source: str, model_name: str
-) -> Iterable[np.array]:
+    img_data: Iterable[np.ndarray], model_source: str, model_name: str
+) -> Iterable[np.ndarray]:
     model = torch.hub.load(model_source, model_name)
     for img in img_data:
         results = model(img)
         yield results
 
 
-def load_images(imgs: List[str]) -> Iterable[np.array]:
+def load_images(imgs: List[str]) -> Iterable[np.ndarray]:
     for img in imgs:
         with urllib.request.urlopen(img) as response:
             img_pil = Image.open(response, formats=["JPEG"])
-            img_numpy = np.array(img_pil)
+            img_numpy = np.ndarray(img_pil)
             yield img_numpy
 
 
 def remap_results(
-    model_results: Iterable[np.array], classmap: Dict[int, str]
+    model_results: Iterable[np.ndarray], classmap: Dict[int, str]
 ) -> Iterable[Tuple[str, float]]:
     for result in model_results:
         result_class_idx = np.argmax(result)

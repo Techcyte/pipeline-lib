@@ -13,24 +13,24 @@ While not all high throughput data processing can be described by sequential dat
 from pipeline_executor import execute, PipelineTask
 
 """
-Each part of the pipeline are python generators, 
-easily unit testable in isolation; 
+Each part of the pipeline are python generators,
+easily unit testable in isolation;
 no multithreading or multiprocessing is necessary in each step
 """
-def run_model(img_data: Iterable[np.array], model_source: str, model_name: str)->Iterable[np.array]:
-    model = torch.hub.load(model_source, model_name)  
+def run_model(img_data: Iterable[np.array], model_source: str, model_name: str)->Iterable[np.ndarray]:
+    model = torch.hub.load(model_source, model_name)
     for img in img_data:
         results = model(img)
         yield results
 
 
-def load_images(imgs: List[str])->Iterable[np.array]:
+def load_images(imgs: List[str])->Iterable[np.ndarray]:
     for img in imgs:
         with urllib.request.urlopen(img) as response:
             img_bytes = response.read()
             img_pil = Image.open(img_bytes, formats=["JPEG"])
             img_numpy = np.array(img_pil)
-            yield img_pil
+            yield img_numpy
 
 
 def remap_results(model_results: Iterable[np.array], classmap: Dict[int, str])->Iterable[Tuple[str, float]]:
@@ -50,7 +50,7 @@ def aggregate_results(classes: Iterable[Tuple[str, float]])->None:
 The system details of the pipeline (number of processes, max buffer size, etc)
 are defined in a list of simple PipelineTask objects, then executed.
 
-Note that in theory, this list of PipelineTask can be built dynamically, 
+Note that in theory, this list of PipelineTask can be built dynamically,
 allowing for various sorts of encapsulation to be built around this library.
 """
 def main():
@@ -106,14 +106,14 @@ Each *source*, *worker* and *sink* is allocated its own process (TODO: support s
 The bulk of this library's complexity is in robust error handling. The following rules for handling errors are tested (TODO: link these to the relevant unit test names)
 
 1. If the *source* generator stops normally before downstream *workers* or *sinks*, then the remaining workers will continue to consume thier buffers without issue.
-1. If a *worker* generator stops normally **after** its upstream processes have finished, then remainder of the pipeline continues proccessing the remainder of the buffered work 
+1. If a *worker* generator stops normally **after** its upstream processes have finished, then remainder of the pipeline continues proccessing the remainder of the buffered work
 1. If any *worker* generator stops **before** its last upstream *worker* or *source* stops, then the system assumes that this worker dropped important messages, and the whole pipeline is killed as soon as possible, raising an error message defailing which generator stopped early.
 1. If any *source* or *worker* raises an exception, or dies with a non-zero exit code, the entire queue is killed and an error is raised in the main process with a helpful error message detailing exactly which pipeline step(s) failed and with what error(s).
 1. If the *sink* raises an exception before any *source* or *worker* finishes, then all other workers in the pipeline are killed, the original error is propogated in the main process.
 
 Note: Rule #3 above is the inspiration behind the system limitation of having only a single *source* process. It is difficult to make an educated guess to whether messages are dropped unless there is a single source of truth defining messages at the root.
 
-### Type checking 
+### Type checking
 
 This library enforces strict type hint checking at pipeline build time through runtime type annotation introspection. So similarly to pydantic or cattrs, it will validate your pipeline based on whether the input of a worker (the first argument) in the pipeline matches the type of the output of the worker before it. Rules include:
 
