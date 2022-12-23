@@ -1,12 +1,9 @@
 import multiprocessing as mp
-import os
 import pickle
-from typing import Union
 
-import psutil
 import pytest
 
-from pipeline_executor import BadTaskExit, PipelineTask, execute
+from pipeline_executor import PipelineTask, execute
 
 from .example_funcs import *
 
@@ -69,12 +66,15 @@ def test_execute_exception():
         execute(tasks)
 
 
+class SuddenExit(RuntimeError):
+    pass
+
+
 def sudden_exit_fn(arg: Iterable[int]) -> Iterable[int]:
     # start up input generator/process
     next(iter(arg))
-    # kills process via psutil so that python does not know about it
-    proc = psutil.Process(os.getpid())
-    proc.kill()
+    # thread raises exception so that python does not know about it
+    raise SuddenExit("sudden exit")
 
 
 def test_sudden_exit_middle():
@@ -89,7 +89,7 @@ def test_sudden_exit_middle():
             print_numbers,
         ),
     ]
-    with pytest.raises(BadTaskExit):
+    with pytest.raises(SuddenExit):
         execute(tasks)
 
 
@@ -103,7 +103,7 @@ def test_sudden_exit_end():
         ),
         PipelineTask(save_results),
     ]
-    with pytest.raises(BadTaskExit):
+    with pytest.raises(SuddenExit):
         execute(tasks)
 
 
@@ -136,9 +136,9 @@ def test_single_worker_error():
             constants={
                 "started_event": started_event,
             },
-            num_procs=2,
+            num_threads=2,
         ),
-        PipelineTask(print_numbers, num_procs=2),
+        PipelineTask(print_numbers, num_threads=2),
     ]
     with pytest.raises(TestExpectedException):
         execute(tasks)
@@ -153,7 +153,6 @@ def test_many_workers_correctness():
     Tests that many workers working on lots of data
     eventually returns the correct result, without packet loss or exceptions
     """
-    started_event = mp.Event()
     tasks = [
         PipelineTask(
             generate_many,
@@ -163,16 +162,16 @@ def test_many_workers_correctness():
             constants={
                 "add_val": 5,
             },
-            num_procs=4,
+            num_threads=4,
         ),
         PipelineTask(
             group_numbers,
             constants={"num_groups": 10},
-            num_procs=4,
+            num_threads=4,
         ),
         PipelineTask(
             sum_numbers,
-            num_procs=4,
+            num_threads=4,
         ),
         PipelineTask(save_results),
     ]
@@ -182,35 +181,10 @@ def test_many_workers_correctness():
     assert actual_result == expected_result
 
 
-def get_worker_pids(inpt: Iterable[int], process_set: set) -> Iterable[int]:
-    pid = os.getpid()
-    for _ in inpt:
-        yield pid
-
-
-def test_many_workers_utilized():
-    """
-    Tests that many workers working on lots of data
-    actually uses the different processes meaningfully
-    """
-    n_procs = 5
-    process_set = set()
-    tasks = [
-        PipelineTask(
-            generate_many,
-        ),
-        PipelineTask(
-            get_worker_pids,
-            constants={
-                "process_set": process_set,
-            },
-            num_procs=n_procs,
-        ),
-        PipelineTask(save_results),
-    ]
-    execute(tasks)
-    assert len(set(load_results())) == n_procs
-
-
 if __name__ == "__main__":
-    test_many_workers_utilized()
+    try:
+        test_many_workers_correctness()
+    except Exception as err:
+        print("err")
+        print(err)
+        print(type(err))

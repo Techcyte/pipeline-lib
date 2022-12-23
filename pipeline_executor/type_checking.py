@@ -85,11 +85,11 @@ def type_check_tasks(tasks: List[PipelineTask]):
                 f"In task {task.name}, expected input {input_type}, received input {prev_type}."
             )
 
-        if task_idx == 0 and task.num_procs != 1:
+        if task_idx == 0 and task.num_threads != 1:
             raise PipelineTypeError(
                 f"Only supports 1 process for the first task in a pipeline, "
                 "due to difficulties reasoning about exit conditions, but "
-                " {task.num_procs} processes requested. "
+                " {task.num_threads} processes requested. "
             )
 
         if task_idx != len(tasks) - 1 and return_type is None:
@@ -115,17 +115,17 @@ def type_check_tasks(tasks: List[PipelineTask]):
 
 
 def _sanity_check_mp_params(task: PipelineTask):
-    if task.num_procs <= 0:
+    if task.num_threads <= 0:
         raise PipelineTypeError(
-            f"In task {task.name}, num_procs value {task.num_procs} needs to be positive"
+            f"In task {task.name}, num_threads value {task.num_threads} needs to be positive"
         )
 
-    if task.num_procs > mp.cpu_count():
+    if task.num_threads > mp.cpu_count():
         warnings.warn(
-            f"In task {task.name}, num_procs value {task.num_procs} was greater than number of cpus on machine {mp.cpu_count()}"
+            f"In task {task.name}, num_threads value {task.num_threads} was greater than number of cpus on machine {mp.cpu_count()}"
         )
 
     if task.out_buffer_size <= 0:
         raise PipelineTypeError(
-            f"In task {task.name}, out_buffer_size {task.num_procs} needs to be positive"
+            f"In task {task.name}, out_buffer_size {task.num_threads} needs to be positive"
         )
