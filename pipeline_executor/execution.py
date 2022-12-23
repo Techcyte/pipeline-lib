@@ -1,56 +1,68 @@
-import multiprocessing as mp
-import queue as q
 import threading as tr
 import traceback
-from ast import Dict
-from concurrent import futures
-from threading import Lock
-from typing import Any, Iterable, List, Tuple
+from collections import deque
+from threading import Lock, Semaphore
+from typing import Any, Iterable, List
 
 from .pipeline_task import PipelineTask
-from .type_checking import type_check_tasks
-
-QUEUE_POLL_TIMEOUT = 0.05
+from .type_checking import MAX_NUM_THREADS, type_check_tasks
 
 
 class TaskOutput:
-    def __init__(self, num_upstream_tasks: int) -> None:
-        self.queue = q.Queue()
+    def __init__(self, num_upstream_tasks: int, packets_in_flight: int) -> None:
+        self.queue_len = Semaphore(value=0)
+        self.queue_space = Semaphore(value=packets_in_flight)
+        self.queue = deque(maxlen=packets_in_flight)
         self.lock = Lock()
         self.remaining_upstream_tasks = num_upstream_tasks
         self.error_info = None
 
     def iter_results(self) -> Iterable[Any]:
         while True:
-            try:
-                item = self.queue.get(block=True, timeout=QUEUE_POLL_TIMEOUT)
-                yield item
-            except q.Empty:
-                with self.lock:
-                    if (
-                        self.error_info is not None
-                        or self.remaining_upstream_tasks == 0
-                    ):
-                        # upstream won't be sending any more information, stop iterating
-                        return
+            self.queue_len.acquire()
+            if self.is_finished():
+                return
+            item = self.queue.popleft()
+            yield item
+            # this release needs to happen after the yield
+            # completes to support full synchronization semantics with packets_in_flight=0
+            self.queue_space.release(1)
 
     def put_results(self, iterable: Iterable[Any]):
-        for item in iterable:
-            try:
-                self.queue.put(item, block=True, timeout=QUEUE_POLL_TIMEOUT)
-            except q.Full:
-                with self.lock:
-                    if self.error_info is not None:
-                        # downstream won't be receiving any more information, stop trying to put stuff on queue
-                        return
+        try:
+            while True:
+                # wait for space to be avaliable on queue before even fetching the next item
+                # essential for full synchronization semantics with packets_in_flight=0
+                self.queue_space.acquire()
+                if self.is_finished():
+                    return
+
+                item = next(iterable)
+                self.queue.append(item)
+                self.queue_len.release(1)
+        except StopIteration:
+            # normal end of iteration
+            self.task_done()
+
+    def is_finished(self):
+        return self.error_info is not None or self.remaining_upstream_tasks <= 0
 
     def task_done(self):
         with self.lock:
             self.remaining_upstream_tasks -= 1
+            if self.remaining_upstream_tasks <= 0:
+                self.terminate()
 
     def set_error(self, task_name, err, traceback):
         with self.lock:
             self.error_info = (task_name, err, traceback)
+            self.terminate()
+
+    def terminate(self):
+        self.remaining_upstream_tasks = 0
+        # release all consumers and producers semaphores so that they exit quickly
+        self.queue_space.release(MAX_NUM_THREADS)
+        self.queue_len.release(MAX_NUM_THREADS)
 
 
 def _start_singleton(
@@ -125,7 +137,9 @@ def execute(tasks: List[PipelineTask]):
         worker_tasks = tasks[1:-1]
 
         # number of processes are of the producing task
-        data_streams = [TaskOutput(t.num_threads) for t in tasks[:-1]]
+        data_streams = [
+            TaskOutput(t.num_threads, t.packets_in_flight) for t in tasks[:-1]
+        ]
         # only one source thread per program
         threads: List[tr.Thread] = [
             tr.Thread(target=_start_source, args=(source_task, data_streams[0]))

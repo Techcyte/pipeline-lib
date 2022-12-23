@@ -11,7 +11,10 @@ class PipelineTask:
     generator: Callable
     constants: Optional[Dict[str, Any]] = None
     num_threads: int = 1
-    out_buffer_size: int = 4
+    # one packet in flight means that between both the producer and consumer,
+    # only one packet ever is being processed at a time.
+    # So one packet means full execution synchronization
+    packets_in_flight: int = 1
 
     @property
     def name(self):

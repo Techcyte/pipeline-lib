@@ -6,6 +6,8 @@ from typing import Iterable, List, Type
 
 from .pipeline_task import PipelineTask
 
+MAX_NUM_THREADS = 128
+
 
 class PipelineTypeError(RuntimeError):
     pass
@@ -120,12 +122,22 @@ def _sanity_check_mp_params(task: PipelineTask):
             f"In task {task.name}, num_threads value {task.num_threads} needs to be positive"
         )
 
+    if task.num_threads > MAX_NUM_THREADS:
+        raise PipelineTypeError(
+            f"In task {task.name}, num_threads value {task.num_threads} was greater than hard limit {MAX_NUM_THREADS} for number of threads per task"
+        )
+
     if task.num_threads > mp.cpu_count():
         warnings.warn(
             f"In task {task.name}, num_threads value {task.num_threads} was greater than number of cpus on machine {mp.cpu_count()}"
         )
 
-    if task.out_buffer_size <= 0:
+    if task.num_threads > task.packets_in_flight:
         raise PipelineTypeError(
-            f"In task {task.name}, out_buffer_size {task.num_threads} needs to be positive"
+            f"In task {task.name}, packets_in_flight {task.packets_in_flight} is less than num_threads {task.num_threads}, which can lead to deadlocks and data corruption."
+        )
+
+    if task.packets_in_flight == 1:
+        warnings.warn(
+            f"In task {task.name}, packets_in_flight {task.packets_in_flight} is 0, indicating full synchronization"
         )
