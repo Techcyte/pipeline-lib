@@ -1,6 +1,6 @@
 import multiprocessing as mp
 import pickle
-
+from contextlib import contextmanager
 import pytest
 
 from pipeline_executor import PipelineTask, execute
@@ -39,6 +39,26 @@ def test_execute():
     execute(tasks)
 
 
+@contextmanager
+def raises_from(err_type):
+    try:
+        yield
+    except Exception as err:
+        if isinstance(err, err_type) or (err.__cause__ and isinstance(err.__cause__, err_type)):
+            # passes test
+            return
+        raise AssertionError(f"expected error of type {err_type} got error {err}")
+
+
+def test_raises_from():
+    # tests testing utility above
+    with pytest.raises(AssertionError):
+        with raises_from(RuntimeError):
+            raise ValueError()
+    with raises_from(ValueError):
+        raise ValueError()
+
+
 class TestExpectedException(ValueError):
     pass
 
@@ -62,7 +82,7 @@ def test_execute_exception():
             print_numbers,
         ),
     ]
-    with pytest.raises(TestExpectedException):
+    with raises_from(TestExpectedException):
         execute(tasks)
 
 
@@ -89,7 +109,7 @@ def test_sudden_exit_middle():
             print_numbers,
         ),
     ]
-    with pytest.raises(SuddenExit):
+    with raises_from(SuddenExit):
         execute(tasks)
 
 
@@ -103,7 +123,7 @@ def test_sudden_exit_end():
         ),
         PipelineTask(save_results),
     ]
-    with pytest.raises(SuddenExit):
+    with raises_from(SuddenExit):
         execute(tasks)
 
 
@@ -141,7 +161,7 @@ def test_single_worker_error():
         ),
         PipelineTask(print_numbers, num_threads=2, packets_in_flight=2),
     ]
-    with pytest.raises(TestExpectedException):
+    with raises_from(TestExpectedException):
         execute(tasks)
 
 
@@ -224,7 +244,7 @@ def test_many_packets_correctness():
 
 if __name__ == "__main__":
     # try:
-    test_execute()
+    test_raises_from()
     # except Exception as err:
     #     print("err")
     #     print(err)

@@ -8,6 +8,10 @@ from .pipeline_task import PipelineTask
 from .type_checking import MAX_NUM_THREADS, type_check_tasks
 
 
+class TaskError(RuntimeError):
+    pass
+
+
 class TaskOutput:
     def __init__(self, num_upstream_tasks: int, packets_in_flight: int) -> None:
         self.queue_len = Semaphore(value=0)
@@ -194,5 +198,4 @@ def execute(tasks: List[PipelineTask]):
             if stream.error_info is not None:
                 # should only be at most one unique error, just raise it
                 task_name, err, traceback_str = stream.error_info
-                print(f"Task; {task_name} errored\n{traceback_str}\n{err}")
-                raise err
+                raise TaskError(f"Task; {task_name} errored\n{traceback_str}\n{err}") from err
