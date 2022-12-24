@@ -69,7 +69,7 @@ class TaskOutput:
 
     def set_error(self, task_name, err, traceback_str):
         with self.lock:
-            if self.error_info is not None:
+            if self.error_info is None:
                 self.error_info = (task_name, err, traceback_str)
         # release all consumers and producers semaphores so that they exit quickly
         for _i in range(MAX_NUM_WORKERS):
