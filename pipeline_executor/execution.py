@@ -198,4 +198,6 @@ def execute(tasks: List[PipelineTask]):
             if stream.error_info is not None:
                 # should only be at most one unique error, just raise it
                 task_name, err, traceback_str = stream.error_info
-                raise TaskError(f"Task; {task_name} errored\n{traceback_str}\n{err}") from err
+                raise TaskError(
+                    f"Task; {task_name} errored\n{traceback_str}\n{err}"
+                ) from err

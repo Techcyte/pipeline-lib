@@ -1,6 +1,7 @@
 import multiprocessing as mp
 import pickle
 from contextlib import contextmanager
+
 import pytest
 
 from pipeline_executor import PipelineTask, execute
@@ -44,7 +45,9 @@ def raises_from(err_type):
     try:
         yield
     except Exception as err:
-        if isinstance(err, err_type) or (err.__cause__ and isinstance(err.__cause__, err_type)):
+        if isinstance(err, err_type) or (
+            err.__cause__ and isinstance(err.__cause__, err_type)
+        ):
             # passes test
             return
         raise AssertionError(f"expected error of type {err_type} got error {err}")
