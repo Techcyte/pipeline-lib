@@ -56,6 +56,7 @@ def main():
                 constants={
                     "imgs": imgs,
                 },
+                packets_in_flight=2,
             ),
             PipelineTask(
                 run_model,
@@ -63,6 +64,7 @@ def main():
                     "model_name": "yolov5s",  # or yolov5n - yolov5x6, custom
                     "model_source": "ultralytics/yolov5",
                 },
+                packets_in_flight=4,
             ),
             PipelineTask(
                 remap_results,

@@ -87,13 +87,6 @@ def type_check_tasks(tasks: List[PipelineTask]):
                 f"In task {task.name}, expected input {input_type}, received input {prev_type}."
             )
 
-        if task_idx == 0 and task.num_threads != 1:
-            raise PipelineTypeError(
-                f"Only supports 1 process for the first task in a pipeline, "
-                "due to difficulties reasoning about exit conditions, but "
-                " {task.num_threads} processes requested. "
-            )
-
         if task_idx != len(tasks) - 1 and return_type is None:
             raise PipelineTypeError(
                 f"None return type only allowed in final task of pipe"
