@@ -159,10 +159,10 @@ def test_single_worker_error():
             constants={
                 "started_event": started_event,
             },
-            num_threads=2,
+            num_workers=2,
             packets_in_flight=2,
         ),
-        PipelineTask(print_numbers, num_threads=2, packets_in_flight=2),
+        PipelineTask(print_numbers, num_workers=2, packets_in_flight=2),
     ]
     with raises_from(TestExpectedException):
         execute(tasks)
@@ -186,18 +186,18 @@ def test_many_workers_correctness():
             constants={
                 "add_val": 5,
             },
-            num_threads=15,
+            num_workers=15,
             packets_in_flight=15,
         ),
         PipelineTask(
             group_numbers,
             constants={"num_groups": 10},
-            num_threads=1,
+            num_workers=1,
             packets_in_flight=1,
         ),
         PipelineTask(
             sum_numbers,
-            num_threads=16,
+            num_workers=16,
             packets_in_flight=20,
         ),
         PipelineTask(save_results),
@@ -223,18 +223,18 @@ def test_many_packets_correctness():
             constants={
                 "add_val": 5,
             },
-            num_threads=4,
+            num_workers=4,
             packets_in_flight=40,
         ),
         PipelineTask(
             group_numbers,
             constants={"num_groups": 10},
-            num_threads=4,
+            num_workers=4,
             packets_in_flight=10,
         ),
         PipelineTask(
             sum_numbers,
-            num_threads=4,
+            num_workers=4,
             packets_in_flight=100,
         ),
         PipelineTask(save_results),
@@ -243,12 +243,3 @@ def test_many_packets_correctness():
     actual_result = sum(load_results())
     expected_result = 450135000
     assert actual_result == expected_result
-
-
-if __name__ == "__main__":
-    # try:
-    test_raises_from()
-    # except Exception as err:
-    #     print("err")
-    #     print(err)
-    #     print(type(err))

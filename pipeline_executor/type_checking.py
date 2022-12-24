@@ -6,7 +6,7 @@ from typing import Iterable, List, Type
 
 from .pipeline_task import PipelineTask
 
-MAX_NUM_THREADS = 128
+MAX_NUM_WORKERS = 128
 
 
 class PipelineTypeError(RuntimeError):
@@ -110,27 +110,17 @@ def type_check_tasks(tasks: List[PipelineTask]):
 
 
 def _sanity_check_mp_params(task: PipelineTask):
-    if task.num_threads <= 0:
+    if task.num_workers <= 0:
         raise PipelineTypeError(
-            f"In task {task.name}, num_threads value {task.num_threads} needs to be positive"
+            f"In task {task.name}, num_workers value {task.num_workers} needs to be positive"
         )
 
-    if task.num_threads > MAX_NUM_THREADS:
+    if task.num_workers > MAX_NUM_WORKERS:
         raise PipelineTypeError(
-            f"In task {task.name}, num_threads value {task.num_threads} was greater than hard limit {MAX_NUM_THREADS} for number of threads per task"
+            f"In task {task.name}, num_workers value {task.num_workers} was greater than hard limit {MAX_NUM_WORKERS} for number of threads per task"
         )
 
-    if task.num_threads > mp.cpu_count():
-        warnings.warn(
-            f"In task {task.name}, num_threads value {task.num_threads} was greater than number of cpus on machine {mp.cpu_count()}"
-        )
-
-    if task.num_threads > task.packets_in_flight:
+    if task.num_workers > task.packets_in_flight:
         raise PipelineTypeError(
-            f"In task {task.name}, packets_in_flight {task.packets_in_flight} is less than num_threads {task.num_threads}, which can lead to deadlocks and data corruption."
-        )
-
-    if task.packets_in_flight == 1:
-        warnings.warn(
-            f"In task {task.name}, packets_in_flight {task.packets_in_flight} is 0, indicating full synchronization"
+            f"In task {task.name}, packets_in_flight {task.packets_in_flight} is less than num_workers {task.num_workers}, which can lead to deadlocks."
         )

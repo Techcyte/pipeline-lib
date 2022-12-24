@@ -5,7 +5,7 @@ from threading import Lock, Semaphore
 from typing import Any, Iterable, List
 
 from .pipeline_task import PipelineTask
-from .type_checking import MAX_NUM_THREADS, type_check_tasks
+from .type_checking import MAX_NUM_WORKERS, type_check_tasks
 
 
 class TaskError(RuntimeError):
@@ -43,7 +43,7 @@ class TaskOutput:
 
         # release all peers that may be waiting for data that will never come
         self.queue_empty = True
-        self.queue_len.release(MAX_NUM_THREADS)
+        self.queue_len.release(MAX_NUM_WORKERS)
 
     def put_results(self, iterable: Iterable[Any]):
         try:
@@ -76,14 +76,14 @@ class TaskOutput:
                     self.queue_len.release(1)
                 else:
                     self.queue_empty = True
-                    self.queue_len.release(MAX_NUM_THREADS)
+                    self.queue_len.release(MAX_NUM_WORKERS)
 
     def set_error(self, task_name, err, traceback):
         with self.lock:
             self.error_info = (task_name, err, traceback)
         # release all consumers and producers semaphores so that they exit quickly
-        self.queue_space.release(MAX_NUM_THREADS)
-        self.queue_len.release(MAX_NUM_THREADS)
+        self.queue_space.release(MAX_NUM_WORKERS)
+        self.queue_len.release(MAX_NUM_WORKERS)
 
 
 def _start_singleton(
@@ -157,14 +157,14 @@ def execute(tasks: List[PipelineTask]):
 
         # number of processes are of the producing task
         data_streams = [
-            TaskOutput(t.num_threads, t.packets_in_flight) for t in tasks[:-1]
+            TaskOutput(t.num_workers, t.packets_in_flight) for t in tasks[:-1]
         ]
         # only one source thread per program
         threads: List[tr.Thread] = [
             tr.Thread(target=_start_source, args=(source_task, data_streams[0]))
         ]
         for i, worker_task in enumerate(worker_tasks):
-            for _ in range(worker_task.num_threads):
+            for _ in range(worker_task.num_workers):
                 threads.append(
                     tr.Thread(
                         target=_start_worker,
@@ -172,7 +172,7 @@ def execute(tasks: List[PipelineTask]):
                     )
                 )
 
-        for _ in range(sink_task.num_threads):
+        for _ in range(sink_task.num_workers):
             threads.append(
                 tr.Thread(target=_start_sink, args=(sink_task, data_streams[-1]))
             )

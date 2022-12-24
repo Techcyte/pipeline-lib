@@ -10,7 +10,7 @@ class PipelineTask:
 
     generator: Callable
     constants: Optional[Dict[str, Any]] = None
-    num_threads: int = 1
+    num_workers: int = 1
     # one packet in flight means that between both the producer and consumer,
     # only one packet ever is being processed at a time.
     # So one packet means full execution synchronization

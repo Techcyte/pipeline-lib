@@ -74,7 +74,7 @@ def main():
                 "model_source": 'ultralytics/yolov5',
             },
             packets_in_flight=4,
-            num_threads=2,
+            num_workers=2,
         ),
         PipelineTask(
             remap_results,
@@ -97,24 +97,33 @@ def main():
 
 A Pipeline has three parts:
 
-1. A single *source* generator, outputting a linear stream of work items
-2. *Worker* generators, consuming a linear stream of inputs and producing stream of outputs. These streams do not have to be one-to-one. If the inputs and outputs can be handled independently (user responsible for verifying this), then these workers can be multiplexed across parallel threads.
-3. A *sink*: either another function that consumes items, or an iterator that the main thread can use to veiw the outputs. If it is a function that consumes items, then it can be multiplexed like a worker.
+1. A *source* generator, outputting a stream of work items
+2. *Processor* generators, consuming a linear stream of inputs and producing stream of outputs. These streams do not have to be one-to-one. If the inputs and outputs can be handled independently (user responsible for verifying this), then these processors can be multiplexed across parallel threads.
+3. A *sink*: a function that consumes an iterator, returns None
 
+The runtime execution model has two concepts:
+
+1. Max Packets in Flight: Max number of total packets being constructed or being consumed. A "packet" is assumped to be under construction whenever a producer or a consumer worker is running. So `packets_in_flight=1` means that the work on the data is completed fully synchronously. If the number of packets is greater than the number of workers, they are stored FIFO queue buffer.
+1. Workers: A worker is an independent thread of execution working in an instance of a generator. More than one worker can potentially lead to greater throughput, depending on the implementation.
 
 ### Runtime error handling behavior
 
-The bulk of this library's complexity is in robust error handling. The following rules for handling errors are tested (TODO: link these to the relevant unit test names)
+The following rules for handling errors are tested.
 
-1. If the *source* generator stops normally before downstream *workers* or *sinks*, then the remaining workers will continue to consume thier buffers without issue.
-1. If a *worker* generator stops normally **after** its upstream threads have finished, then remainder of the pipeline continues proccessing the remainder of the buffered work
-1. If any *source*, *worker*, or *sink* raises an exception, the entire queue is killed and an error is raised in the main thread with a helpful error message detailing exactly which pipeline step(s) failed and with what error(s).
+1. If the *source* generator stops normally before downstream *processor* or *sinks*, then the remaining workers will continue to consume thier buffers without issue.
+1. If a *processor* generator stops normally **after** its upstream threads have finished, then remainder of the pipeline continues proccessing the remainder of the buffered work
+1. If any *source*, *processor*, or *sink* raises an exception, the entire queue is killed and an error is raised in the main thread with a helpful error message detailing exactly which pipeline step(s) failed and with what error(s).
 
 ### Type checking
 
-This library enforces strict type hint checking at pipeline build time through runtime type annotation introspection. So similarly to pydantic or cattrs, it will validate your pipeline based on whether the input of a worker (the first argument) in the pipeline matches the type of the output of the worker before it. Rules include:
+This library enforces strict type hint checking at pipeline build time through runtime type annotation introspection. So similarly to pydantic or cattrs, it will validate your pipeline based on whether the input of a processor (the first argument) in the pipeline matches the type of the output of the processor before it. Rules include:
 
-1. First argument of any worker or sink must be an `Iterable[<some_type>]` where that type matches the return type of the previous function
-1. Any source or worker function must return an `Iterable[<some_type>]`
+1. First argument of any processor or sink must be an `Iterable[<some_type>]` where that type matches the return type of the previous function
+1. Any source or processor function must return an `Iterable[<some_type>]`
 1. All arguments other than the first are specified in the `constants` input dict to the PipelineTask (the types of these objects are not currently checked)
 
+There are also some sanity checks on the runtime values
+
+1. `num_workers > 0`
+1. `num_workers <= MAX_NUM_WORKERS` (currently fixed at 128)
+1. `num_workers <= packets_in_flight` (can deadlock if this isn't true)
