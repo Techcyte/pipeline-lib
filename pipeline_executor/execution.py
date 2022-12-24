@@ -12,77 +12,64 @@ class TaskError(RuntimeError):
     pass
 
 
+class PropogateErr(RuntimeError):
+    pass
+
+
 class TaskOutput:
     def __init__(self, num_upstream_tasks: int, packets_in_flight: int) -> None:
+        self.num_tasks_remaining = num_upstream_tasks
         self.queue_len = Semaphore(value=0)
-        self.queue_space = Semaphore(value=packets_in_flight)
+        self.packets_space = Semaphore(value=packets_in_flight)
         self.queue = deque(maxlen=packets_in_flight)
         self.lock = Lock()
-        self.remaining_upstream_tasks = num_upstream_tasks
         self.error_info = None
-        self.queue_empty = False
 
     def iter_results(self) -> Iterable[Any]:
-        while self.upstream_alive():
+        while True:
             self.queue_len.acquire()
-            if self.is_errored() or self.queue_empty:
+            if self.is_errored():
+                raise PropogateErr()
+            try:
+                item = self.queue.popleft()
+            except IndexError:
+                # only happens when out of results
                 return
-            item = self.queue.popleft()
             yield item
+
             # this release needs to happen after the yield
             # completes to support full synchronization semantics with packets_in_flight=1
-            self.queue_space.release(1)
-
-        # work done, finish up remainder of queue
-        while self.queue_len.acquire(blocking=False):
-            if self.is_errored():
-                return
-            item = self.queue.popleft()
-            yield item
-            self.queue_space.release(1)
-
-        # release all peers that may be waiting for data that will never come
-        self.queue_empty = True
-        self.queue_len.release(MAX_NUM_WORKERS)
+            self.packets_space.release(1)
 
     def put_results(self, iterable: Iterable[Any]):
         try:
             while True:
                 # wait for space to be avaliable on queue before iterating to next item
                 # essential for full synchronization semantics with packets_in_flight=1
-                self.queue_space.acquire()
+                self.packets_space.acquire()
+
                 if self.is_errored():
-                    return
+                    raise PropogateErr()
 
                 item = next(iterable)
+
                 self.queue.append(item)
                 self.queue_len.release(1)
         except StopIteration:
             # normal end of iteration
-            self.task_done()
+            with self.lock:
+                self.num_tasks_remaining -= 1
+                if self.num_tasks_remaining == 0:
+                    self.queue_len.release(MAX_NUM_WORKERS)
 
     def is_errored(self):
         return self.error_info is not None
-
-    def upstream_alive(self):
-        return self.remaining_upstream_tasks > 0
-
-    def task_done(self):
-        with self.lock:
-            self.remaining_upstream_tasks -= 1
-            if self.remaining_upstream_tasks <= 0:
-                if self.queue_len.acquire(blocking=False):
-                    # aquired a queue item in the condition, release it back to the iter_results worker
-                    self.queue_len.release(1)
-                else:
-                    self.queue_empty = True
-                    self.queue_len.release(MAX_NUM_WORKERS)
 
     def set_error(self, task_name, err, traceback):
         with self.lock:
             self.error_info = (task_name, err, traceback)
         # release all consumers and producers semaphores so that they exit quickly
-        self.queue_space.release(MAX_NUM_WORKERS)
+        self.packets_space.release(MAX_NUM_WORKERS)
         self.queue_len.release(MAX_NUM_WORKERS)
 
 
@@ -195,7 +182,7 @@ def execute(tasks: List[PipelineTask]):
             raise err
 
         for stream in data_streams:
-            if stream.error_info is not None:
+            if stream.error_info is not None and not isinstance(stream.error_info[1],PropogateErr):
                 # should only be at most one unique error, just raise it
                 task_name, err, traceback_str = stream.error_info
                 raise TaskError(

@@ -1,6 +1,7 @@
 import multiprocessing as mp
 import pickle
 from contextlib import contextmanager
+import time
 
 import pytest
 
@@ -130,18 +131,62 @@ def test_sudden_exit_end():
         execute(tasks)
 
 
+def sleeper(vals:Iterable[int])->Iterable[int]:
+    time.sleep(0.1)
+    for i in vals:
+        time.sleep(0.01)
+        yield i
+
+
+def test_sudden_exit_middle_sleepers():
+    tasks = [
+        PipelineTask(
+            generate_numbers,
+        ),
+        PipelineTask(sleeper),
+        PipelineTask(
+            sudden_exit_fn,
+        ),
+        PipelineTask(sleeper),
+        PipelineTask(
+            print_numbers,
+        ),
+    ]
+    with raises_from(SuddenExit):
+        execute(tasks)
+
+
+def test_full_contents_buffering():
+    tasks = [
+        PipelineTask(
+            generate_numbers,
+            packets_in_flight=10000,
+        ),
+        PipelineTask(sleeper,packets_in_flight=10000),
+        PipelineTask(
+            print_numbers,
+        ),
+    ]
+    execute(tasks)
+
+
 def only_error_if_second_proc(
     arg: Iterable[int], started_event: mp.Event
 ) -> Iterable[int]:
     """
     only exits if it is the first worker process to start up.
     """
+    yield next(iter(arg))
     is_second_proc = started_event.is_set()
     started_event.set()
     if is_second_proc:
         raise TestExpectedException()
     else:
         yield from arg
+
+
+def generate_infinite()->Iterable[int]:
+    yield from range(10000000000000)
 
 
 def test_single_worker_error():
@@ -152,7 +197,7 @@ def test_single_worker_error():
     started_event = mp.Event()
     tasks = [
         PipelineTask(
-            generate_numbers,
+            generate_infinite,
         ),
         PipelineTask(
             only_error_if_second_proc,
@@ -160,7 +205,7 @@ def test_single_worker_error():
                 "started_event": started_event,
             },
             num_workers=2,
-            packets_in_flight=2,
+            packets_in_flight=10,
         ),
         PipelineTask(print_numbers, num_workers=2, packets_in_flight=2),
     ]
@@ -243,3 +288,7 @@ def test_many_packets_correctness():
     actual_result = sum(load_results())
     expected_result = 450135000
     assert actual_result == expected_result
+
+
+if __name__ == "__main__":
+    test_full_buffering()

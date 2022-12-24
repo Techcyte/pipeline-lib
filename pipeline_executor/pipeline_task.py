@@ -14,7 +14,7 @@ class PipelineTask:
     # one packet in flight means that between both the producer and consumer,
     # only one packet ever is being processed at a time.
     # So one packet means full execution synchronization
-    packets_in_flight: int = 1
+    packets_in_flight: int = 5
 
     @property
     def name(self):
