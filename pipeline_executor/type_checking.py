@@ -1,7 +1,5 @@
 import inspect
-import multiprocessing as mp
 import typing
-import warnings
 from typing import Iterable, List, Type
 
 from .pipeline_task import PipelineTask
@@ -18,8 +16,8 @@ def _type_error_if(condition, message):
         raise PipelineTypeError(message)
 
 
-def is_iterable(type: Type):
-    return typing.get_origin(type) is typing.get_origin(Iterable)
+def is_iterable(type_: Type):
+    return typing.get_origin(type_) is typing.get_origin(Iterable)
 
 
 def get_func_args(func, extract_first=True):
@@ -89,7 +87,7 @@ def type_check_tasks(tasks: List[PipelineTask]):
 
         if task_idx != len(tasks) - 1 and return_type is None:
             raise PipelineTypeError(
-                f"None return type only allowed in final task of pipe"
+                "None return type not allowed in any task except final task of pipe"
             )
 
         task_consts = {} if task.constants is None else task.constants
@@ -105,7 +103,7 @@ def type_check_tasks(tasks: List[PipelineTask]):
 
     if prev_type is not None:
         raise PipelineTypeError(
-            f"In final task {task.name}, expected output type None, actual type {prev_type}."
+            f"In final task {tasks[-1].name}, expected output type None, actual type {prev_type}."
         )
 
 

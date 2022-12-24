@@ -1,7 +1,7 @@
 import multiprocessing as mp
 import pickle
-from contextlib import contextmanager
 import time
+from contextlib import contextmanager
 
 import pytest
 
@@ -131,7 +131,7 @@ def test_sudden_exit_end():
         execute(tasks)
 
 
-def sleeper(vals:Iterable[int])->Iterable[int]:
+def sleeper(vals: Iterable[int]) -> Iterable[int]:
     time.sleep(0.1)
     for i in vals:
         time.sleep(0.01)
@@ -162,10 +162,38 @@ def test_full_contents_buffering():
             generate_numbers,
             packets_in_flight=10000,
         ),
-        PipelineTask(sleeper,packets_in_flight=10000),
+        PipelineTask(sleeper, packets_in_flight=10000),
         PipelineTask(
             print_numbers,
         ),
+    ]
+    execute(tasks)
+
+
+def add_one_to(vals: Iterable[int], value: mp.Value) -> Iterable[int]:
+    for v in vals:
+        value.value += 1
+        assert value.value == 1
+        yield v
+
+
+def sub_one_to(vals: Iterable[int], value: mp.Value) -> Iterable[int]:
+    for v in vals:
+        value.value -= 1
+        assert value.value == 0
+        yield v
+
+
+def test_full_synchronization():
+    val = mp.Value("i", 0)
+    tasks = [
+        PipelineTask(
+            generate_numbers,
+            packets_in_flight=1,
+        ),
+        PipelineTask(add_one_to, packets_in_flight=1, constants=dict(value=val)),
+        PipelineTask(sub_one_to, packets_in_flight=1, constants=dict(value=val)),
+        PipelineTask(print_numbers, packets_in_flight=1),
     ]
     execute(tasks)
 
@@ -185,7 +213,7 @@ def only_error_if_second_proc(
         yield from arg
 
 
-def generate_infinite()->Iterable[int]:
+def generate_infinite() -> Iterable[int]:
     yield from range(10000000000000)
 
 
@@ -291,4 +319,4 @@ def test_many_packets_correctness():
 
 
 if __name__ == "__main__":
-    test_full_buffering()
+    test_full_synchronization()
