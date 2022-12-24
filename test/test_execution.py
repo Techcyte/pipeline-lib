@@ -10,14 +10,7 @@ from .example_funcs import *
 TEMP_FILE = "/tmp/pipeline_pickle"
 
 
-def print_vals(vals: Iterable[int]) -> Iterable[int]:
-    for i in vals:
-        print(i)
-        yield i
-
-
 def save_results(vals: Iterable[int]) -> None:
-    vals = print_vals(vals)
     with open(TEMP_FILE, "wb") as file:
         pickle.dump(list(vals), file)
 
@@ -170,18 +163,56 @@ def test_many_workers_correctness():
             constants={
                 "add_val": 5,
             },
-            num_threads=4,
-            packets_in_flight=4,
+            num_threads=15,
+            packets_in_flight=15,
         ),
         PipelineTask(
             group_numbers,
             constants={"num_groups": 10},
             num_threads=1,
+            packets_in_flight=1,
+        ),
+        PipelineTask(
+            sum_numbers,
+            num_threads=16,
+            packets_in_flight=20,
+        ),
+        PipelineTask(save_results),
+    ]
+    execute(tasks)
+    actual_result = sum(load_results())
+    expected_result = 450135000
+    assert actual_result == expected_result
+
+
+def test_many_packets_correctness():
+    """
+    Tests that many workers working on lots of data
+    eventually returns the correct result, without packet loss or exceptions
+    """
+    tasks = [
+        PipelineTask(
+            generate_many,
+            packets_in_flight=10,
+        ),
+        PipelineTask(
+            add_const,
+            constants={
+                "add_val": 5,
+            },
+            num_threads=4,
+            packets_in_flight=40,
+        ),
+        PipelineTask(
+            group_numbers,
+            constants={"num_groups": 10},
+            num_threads=4,
+            packets_in_flight=10,
         ),
         PipelineTask(
             sum_numbers,
             num_threads=4,
-            packets_in_flight=4,
+            packets_in_flight=100,
         ),
         PipelineTask(save_results),
     ]
@@ -192,9 +223,9 @@ def test_many_workers_correctness():
 
 
 if __name__ == "__main__":
-    try:
-        test_execute()
-    except Exception as err:
-        print("err")
-        print(err)
-        print(type(err))
+    # try:
+    test_execute()
+    # except Exception as err:
+    #     print("err")
+    #     print(err)
+    #     print(type(err))

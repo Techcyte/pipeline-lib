@@ -16,25 +16,38 @@ class TaskOutput:
         self.lock = Lock()
         self.remaining_upstream_tasks = num_upstream_tasks
         self.error_info = None
+        self.queue_empty = False
 
     def iter_results(self) -> Iterable[Any]:
-        while True:
+        while self.upstream_alive():
             self.queue_len.acquire()
-            if self.is_finished():
+            if self.is_errored() or self.queue_empty:
                 return
             item = self.queue.popleft()
             yield item
             # this release needs to happen after the yield
-            # completes to support full synchronization semantics with packets_in_flight=0
+            # completes to support full synchronization semantics with packets_in_flight=1
             self.queue_space.release(1)
+
+        # work done, finish up remainder of queue
+        while self.queue_len.acquire(blocking=False):
+            if self.is_errored():
+                return
+            item = self.queue.popleft()
+            yield item
+            self.queue_space.release(1)
+
+        # release all peers that may be waiting for data that will never come
+        self.queue_empty = True
+        self.queue_len.release(MAX_NUM_THREADS)
 
     def put_results(self, iterable: Iterable[Any]):
         try:
             while True:
-                # wait for space to be avaliable on queue before even fetching the next item
-                # essential for full synchronization semantics with packets_in_flight=0
+                # wait for space to be avaliable on queue before iterating to next item
+                # essential for full synchronization semantics with packets_in_flight=1
                 self.queue_space.acquire()
-                if self.is_finished():
+                if self.is_errored():
                     return
 
                 item = next(iterable)
@@ -44,22 +57,26 @@ class TaskOutput:
             # normal end of iteration
             self.task_done()
 
-    def is_finished(self):
-        return self.error_info is not None or self.remaining_upstream_tasks <= 0
+    def is_errored(self):
+        return self.error_info is not None
+
+    def upstream_alive(self):
+        return self.remaining_upstream_tasks > 0
 
     def task_done(self):
         with self.lock:
             self.remaining_upstream_tasks -= 1
             if self.remaining_upstream_tasks <= 0:
-                self.terminate()
+                if self.queue_len.acquire(blocking=False):
+                    # aquired a queue item in the condition, release it back to the iter_results worker
+                    self.queue_len.release(1)
+                else:
+                    self.queue_empty = True
+                    self.queue_len.release(MAX_NUM_THREADS)
 
     def set_error(self, task_name, err, traceback):
         with self.lock:
             self.error_info = (task_name, err, traceback)
-            self.terminate()
-
-    def terminate(self):
-        self.remaining_upstream_tasks = 0
         # release all consumers and producers semaphores so that they exit quickly
         self.queue_space.release(MAX_NUM_THREADS)
         self.queue_len.release(MAX_NUM_THREADS)
@@ -80,7 +97,6 @@ def _start_source(
         constants = {} if task.constants is None else task.constants
         out_iter = task.generator(**constants)
         downstream.put_results(out_iter)
-        downstream.task_done()
     except Exception as err:
         tb_str = traceback.format_exc()
         downstream.set_error(task.name, err, tb_str)
@@ -96,7 +112,6 @@ def _start_worker(
         generator_input = upstream.iter_results()
         out_iter = task.generator(generator_input, **constants)
         downstream.put_results(out_iter)
-        downstream.task_done()
     except Exception as err:
         tb_str = traceback.format_exc()
         # sets upstream and downstream so that error propogates throughout the system
@@ -159,13 +174,21 @@ def execute(tasks: List[PipelineTask]):
             )
 
         for t in threads:
-            # set everything to be daemon threads so that a keyboard interrupt
-            # or sigterm kills the whole process
-            t.setDaemon(True)
             t.start()
 
-        for t in threads:
-            t.join()
+        try:
+            for t in threads:
+                t.join()
+
+        except BaseException as err:
+            # asks all threads to terminate as quickly as possible
+            tb_str = traceback.format_exc()
+            for s in data_streams:
+                s.set_error("main_task", err, tb_str)
+            # clean up remaining threads so that main process terminates properly
+            for t in threads:
+                t.join()
+            raise err
 
         for stream in data_streams:
             if stream.error_info is not None:
