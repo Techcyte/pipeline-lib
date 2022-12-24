@@ -69,7 +69,8 @@ class TaskOutput:
 
     def set_error(self, task_name, err, traceback_str):
         with self.lock:
-            self.error_info = (task_name, err, traceback_str)
+            if self.error_info is not None:
+                self.error_info = (task_name, err, traceback_str)
         # release all consumers and producers semaphores so that they exit quickly
         for _i in range(MAX_NUM_WORKERS):
             self.queue_len.release()
@@ -106,6 +107,7 @@ def _start_worker(
         generator_input = upstream.iter_results()
         out_iter = task.generator(generator_input, **constants)
         downstream.put_results(out_iter)
+
     except BaseException as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
         # sets upstream and downstream so that error propogates throughout the system
