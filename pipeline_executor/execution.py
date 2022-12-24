@@ -91,7 +91,7 @@ def _start_source(
         constants = {} if task.constants is None else task.constants
         out_iter = task.generator(**constants)
         downstream.put_results(out_iter)
-    except Exception as err:  # pylint: disable=broad-except
+    except BaseException as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
         downstream.set_error(task.name, err, tb_str)
 
@@ -106,7 +106,7 @@ def _start_worker(
         generator_input = upstream.iter_results()
         out_iter = task.generator(generator_input, **constants)
         downstream.put_results(out_iter)
-    except Exception as err:  # pylint: disable=broad-except
+    except BaseException as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
         # sets upstream and downstream so that error propogates throughout the system
         downstream.set_error(task.name, err, tb_str)
@@ -121,7 +121,7 @@ def _start_sink(
         constants = {} if task.constants is None else task.constants
         generator_input = upstream.iter_results()
         task.generator(generator_input, **constants)
-    except Exception as err:  # pylint: disable=broad-except
+    except BaseException as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
         upstream.set_error(task.name, err, tb_str)
 
