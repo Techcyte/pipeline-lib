@@ -39,7 +39,7 @@ class TaskOutput:
 
             # this release needs to happen after the yield
             # completes to support full synchronization semantics with packets_in_flight=1
-            self.packets_space.release(1)
+            self.packets_space.release()
 
     def put_results(self, iterable: Iterable[Any]):
         iterator = iter(iterable)
@@ -55,13 +55,14 @@ class TaskOutput:
                 item = next(iterator)
 
                 self.queue.append(item)
-                self.queue_len.release(1)
+                self.queue_len.release()
         except StopIteration:
             # normal end of iteration
             with self.lock:
                 self.num_tasks_remaining -= 1
                 if self.num_tasks_remaining == 0:
-                    self.queue_len.release(MAX_NUM_WORKERS)
+                    for _i in range(MAX_NUM_WORKERS):
+                        self.queue_len.release()
 
     def is_errored(self):
         return self.error_info is not None
@@ -70,8 +71,9 @@ class TaskOutput:
         with self.lock:
             self.error_info = (task_name, err, traceback_str)
         # release all consumers and producers semaphores so that they exit quickly
-        self.packets_space.release(MAX_NUM_WORKERS)
-        self.queue_len.release(MAX_NUM_WORKERS)
+        for _i in range(MAX_NUM_WORKERS):
+            self.queue_len.release()
+            self.packets_space.release()
 
 
 def _start_singleton(
