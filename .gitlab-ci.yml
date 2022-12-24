@@ -39,6 +39,8 @@ lint:
   script:
     - docker build . -t dataset_builder
     - docker run --rm dataset_builder bash scripts/lint.sh
+  # TODO: remove this when the library is more mature
+  allow_failure: true
 
 unit-test:
   stage: test
