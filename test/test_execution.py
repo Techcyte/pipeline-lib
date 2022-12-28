@@ -1,15 +1,13 @@
 import multiprocessing as mp
 import os
 import pickle
-import signal
 import time
 from contextlib import contextmanager
 
 import pytest
-import psutil
 
-from pipeline_executor import PipelineTask, execute
 import pipeline_executor
+from pipeline_executor import PipelineTask, execute
 
 from .example_funcs import *
 
