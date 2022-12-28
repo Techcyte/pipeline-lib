@@ -1,11 +1,15 @@
 import multiprocessing as mp
+import os
 import pickle
+import signal
 import time
 from contextlib import contextmanager
 
 import pytest
+import psutil
 
 from pipeline_executor import PipelineTask, execute
+import pipeline_executor
 
 from .example_funcs import *
 
@@ -241,6 +245,48 @@ def test_single_worker_error():
         execute(tasks)
 
 
+def force_exit_if_second_proc(
+    arg: Iterable[int], started_event: mp.Event
+) -> Iterable[int]:
+    """
+    only exits if it is the first worker process to start up.
+    """
+    yield next(iter(arg))
+    is_second_proc = started_event.is_set()
+    started_event.set()
+    if is_second_proc:
+        # kill process using very low level os utilities
+        # so that python does not know anything about process exiting
+        SIGKILL = -9
+        os.kill(os.getpid(), SIGKILL)
+    else:
+        yield from arg
+
+
+def test_single_worker_unexpected_exit():
+    """
+    if one process dies and the others do not, then it should still raise an exception,
+    as the dead process might have consumed an important message
+    """
+    started_event = mp.Event()
+    tasks = [
+        PipelineTask(
+            generate_infinite,
+        ),
+        PipelineTask(
+            force_exit_if_second_proc,
+            constants={
+                "started_event": started_event,
+            },
+            num_workers=2,
+            packets_in_flight=10,
+        ),
+        PipelineTask(print_numbers, num_workers=2, packets_in_flight=2),
+    ]
+    with raises_from(pipeline_executor.execution.TaskError):
+        execute(tasks)
+
+
 def generate_many() -> Iterable[int]:
     yield from range(30000)
 
@@ -319,4 +365,4 @@ def test_many_packets_correctness():
 
 
 if __name__ == "__main__":
-    test_full_synchronization()
+    test_single_worker_unexpected_exit()
