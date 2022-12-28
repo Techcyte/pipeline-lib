@@ -1,11 +1,8 @@
 import ctypes
-import queue
-import threading as tr
 import traceback
-from collections import deque
-# from threading import Lock, Semaphore
 from typing import Any, Iterable, List
 import multiprocessing as mp
+import multiprocessing.connection
 import pickle
 
 from .pipeline_task import PipelineTask
