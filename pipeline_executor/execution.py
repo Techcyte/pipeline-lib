@@ -9,7 +9,6 @@ from typing import Any, Iterable, List
 from .pipeline_task import PipelineTask
 from .type_checking import MAX_NUM_WORKERS, type_check_tasks
 
-DEFAULT_BUF_SIZE = 100000
 ERR_BUF_SIZE = 2**17
 
 
@@ -25,9 +24,7 @@ class BufferedQueue:
     def __init__(self, buf_size: int, max_num_elements: int) -> None:
         self.max_num_elements = max_num_elements + 2
         self.buf_size = buf_size
-        self._raw_data = [
-            mp.RawArray(ctypes.c_byte, buf_size) for _ in range(self.max_num_elements)
-        ]
+        self._raw_data = mp.RawArray(ctypes.c_byte, buf_size * self.max_num_elements)
         self.buf_sizes = mp.RawArray(ctypes.c_int, self.max_num_elements)
         self.first_item_pos = mp.Value("i", 0, lock=False)
         self.last_item_pos = mp.Value("i", 0, lock=False)
@@ -37,7 +34,7 @@ class BufferedQueue:
         item_bytes = pickle.dumps(item)
         if len(item_bytes) > self.buf_size:
             raise ValueError(
-                f"Tried to pass item of size {len(item_bytes)} but max buffer isze is {self.buf_size}"
+                f"Tried to pass item of size {len(item_bytes)} but max message size is {self.buf_size}"
             )
         with self.lock:
             write_pos = int(self.first_item_pos.value)
@@ -45,7 +42,8 @@ class BufferedQueue:
             self.first_item_pos.value = new_pos
 
             self.buf_sizes[write_pos] = len(item_bytes)
-            self._raw_data[write_pos][: len(item_bytes)] = item_bytes
+            block_start = write_pos * self.buf_size
+            self._raw_data[block_start : block_start + len(item_bytes)] = item_bytes
 
     def get(self):
         with self.lock:
@@ -54,8 +52,11 @@ class BufferedQueue:
             self.last_item_pos.value = new_pos
 
             num_bytes = self.buf_sizes[read_pos]
+            read_block = read_pos * self.buf_size
             # perform a full copy of the data so that unpickling can be done outside the lock
-            data_bytes = bytes(memoryview(self._raw_data[read_pos])[:num_bytes])
+            data_bytes = bytes(
+                memoryview(self._raw_data)[read_block : read_block + num_bytes]
+            )
         return pickle.loads(data_bytes)
 
     def __len__(self):
@@ -72,16 +73,16 @@ class TaskOutput:
         self,
         num_upstream_tasks: int,
         packets_in_flight: int,
-        has_error: synchronize.Event,
         error_info: BufferedQueue,
+        max_message_size: int,
     ) -> None:
         self.num_tasks_remaining = mp.Value("i", num_upstream_tasks, lock=True)
         self.queue_len = mp.Semaphore(value=0)
         self.packets_space = mp.Semaphore(value=packets_in_flight)
         # using a custom queue implementation rather than multiprocessing.queue
         # because mp.Queue has strange synchronization properties with the semaphores, leading to many bugs
-        self.queue = BufferedQueue(DEFAULT_BUF_SIZE, packets_in_flight)
-        self.has_error = has_error
+        self.queue = BufferedQueue(max_message_size, packets_in_flight)
+        self.has_error = mp.Event()
         self.error_info = error_info
 
     def iter_results(self) -> Iterable[Any]:
@@ -125,6 +126,7 @@ class TaskOutput:
 
     def set_error(self, task_name, err, traceback_str):
         if not self.has_error.is_set():
+            self.has_error.set()
             self.error_info.put((task_name, err, traceback_str))
         # release all consumers and producers semaphores so that they exit quickly
         for _i in range(MAX_NUM_WORKERS):
@@ -150,7 +152,7 @@ def _start_source(
     except BaseException as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
         downstream.set_error(task.name, err, tb_str)
-        raise err
+        # raise err
 
 
 def _start_worker(
@@ -169,7 +171,7 @@ def _start_worker(
         # sets upstream and downstream so that error propogates throughout the system
         downstream.set_error(task.name, err, tb_str)
         upstream.set_error(task.name, err, tb_str)
-        raise err
+        # raise err
 
 
 def _start_sink(
@@ -183,7 +185,7 @@ def _start_sink(
     except BaseException as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
         upstream.set_error(task.name, err, tb_str)
-        raise err
+        # raise err
 
 
 def execute(tasks: List[PipelineTask]):
@@ -208,10 +210,14 @@ def execute(tasks: List[PipelineTask]):
 
     n_total_tasks = sum(task.num_workers for task in tasks)
     err_queue = BufferedQueue(ERR_BUF_SIZE, n_total_tasks + 2)
-    err_event = mp.Event()
     # number of processes are of the producing task
     data_streams = [
-        TaskOutput(t.num_workers, t.packets_in_flight, err_event, err_queue)
+        TaskOutput(
+            t.num_workers,
+            t.packets_in_flight,
+            err_queue,
+            max_message_size=t.max_message_size,
+        )
         for t in tasks[:-1]
     ]
     # only one source thread per program
@@ -245,39 +251,46 @@ def execute(tasks: List[PipelineTask]):
     for process in processes:
         process.start()
 
+    has_error = False
     try:
         sentinel_map = {proc.sentinel: proc for proc in processes}
         sentinel_set = {proc.sentinel for proc in processes}
-        while sentinel_set and not err_event.is_set():
+        while sentinel_set and not has_error:
             done_sentinels = mp_connection.wait(list(sentinel_set))
             sentinel_set -= set(done_sentinels)
             for done_id in done_sentinels:
                 # attempts to catch segfaults and other errors that cannot be caught by python (i.g. sigkill)
                 if sentinel_map[done_id].exitcode != 0:
                     proc_err_msg = f"Process: {sentinel_map[done_id].name} exited with non-zero code {sentinel_map[done_id].exitcode}"
-                    err_event.set()
-                    err_queue.put(
-                        (sentinel_map[done_id].name, TaskError(proc_err_msg), "")
-                    )
+                    for stream in data_streams:
+                        stream.set_error(
+                            sentinel_map[done_id].name, TaskError(proc_err_msg), ""
+                        )
+                    has_error = True
+                    break
 
     except BaseException as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
-        err_event.set()
-        err_queue.put(("_main_thread", err, tb_str))
+        for stream in data_streams:
+            stream.set_error("_main_thread", err, tb_str)
 
     finally:
-        # terminate remaining processes if they still exist (which they shouldn't, under normal execution)
+        # joins processes as cleanup if they successfully exited
+        # give them a decent amount of time to cycle through their current task and exit cleanly
+        for proc in processes:
+            proc.join(timeout=15.0)
+        # escalate, send sigterm to processes
         for proc in processes:
             proc.terminate()
-        # joins processes as cleanup if they successfully exited
+        # wait for terminate signal to propogate through the processes
         for proc in processes:
-            proc.join(timeout=0.5)
+            proc.join(timeout=5.0)
         # force kill the processes if they failed to terminate cleanly
         for proc in processes:
             proc.kill()
             proc.join()
 
-        if err_event.is_set():
+        if has_error:
             # first entry on the error queue should hopefully be the original error, just raise that one single error
             task_name, task_err, traceback_str = err_queue.get()
             # should only be at most one unique error, just raise it

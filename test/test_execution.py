@@ -1,6 +1,7 @@
 import multiprocessing as mp
 import os
 import pickle
+import signal
 import time
 from contextlib import contextmanager
 
@@ -255,8 +256,7 @@ def force_exit_if_second_proc(
     if is_second_proc:
         # kill process using very low level os utilities
         # so that python does not know anything about process exiting
-        SIGKILL = -9
-        os.kill(os.getpid(), SIGKILL)
+        os.kill(os.getpid(), signal.SIGKILL)
     else:
         yield from arg
 
