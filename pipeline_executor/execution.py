@@ -12,7 +12,7 @@ from typing import Any, Iterable, List
 from .pipeline_task import PipelineTask
 from .type_checking import MAX_NUM_WORKERS, type_check_tasks
 
-ERR_BUF_SIZE = 2**17
+ERR_BUF_SIZE = 2**16
 # some arbitrary, hopefully unused number that signals python exiting after placing the error in the queue
 PYTHON_ERR_EXIT_CODE = 187
 # copies are much faster if they are aligned to 16 byte or 32 byte boundaries (depending on archtecture)
@@ -38,9 +38,6 @@ def roundup_to_align(size):
     return size + (-size) % ALIGN_SIZE
 
 
-tot_time = 0
-
-
 class BufferedQueue:
     """
     A custom queue implementation based on fixed-size shared memory buffers to transfer data.
@@ -61,9 +58,9 @@ class BufferedQueue:
     Additionally, this library makes use of the pickly protocol v5's
     buffer interface in `make_buffer_callback` and `iter_stored_buffers` methods.
     This is to support fast copies of numpy arrays, and other buffers.
-    It was chosen over the default numpy serialization method for performance.
+    It was chosen over the default pickle serialization method for performance.
     According to the benchmark in `run_benchmark.py`, it
-    is 100x faster for large buffers. For apples to apples comparison, look at how the benchmark performs in
+    is around 30x faster for large buffers. For apples to apples comparison, look at how the benchmark performs in
     commit 82e01b395e736e5c1cdaae7e1bd8a7dca3f78435 vs commit 89111ffea55063fd40f1894315b8c26673cbe6ce
     """
 
