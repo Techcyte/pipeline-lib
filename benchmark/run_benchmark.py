@@ -112,7 +112,7 @@ def benchmark_execution():
             results.append(end_t - start_t)
         max_val = min(results)
         markdown_lines.append(
-            "|".join(f"{res}" if res != max_val else f"*{res}*" for res in results)
+            "|".join(f"{res}" if res != max_val else f"**{res}**" for res in results)
         )
     return "\n".join(markdown_lines)
 

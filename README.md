@@ -127,3 +127,16 @@ There are also some sanity checks on the runtime values
 1. `num_workers > 0`
 1. `num_workers <= MAX_NUM_WORKERS` (currently fixed at 128)
 1. `num_workers <= packets_in_flight` (can deadlock if this isn't true)
+
+
+## Benchmarks
+
+This gives a rough estimation of how much overhead each parallelism technique has for different workloads. 
+It is produced by running `benchmark/run_benchmark.py`. Results below are on a native linux system on a desktop.
+
+x|sequential-thread|buffered-thread|parallel-thread|sequential-process|buffered-process|parallel-process|sequential-coroutine|buffered-coroutine|parallel-coroutine
+---|---|---|---|---|---|---|---|---|---
+many-small|0.16642332077026367|0.12173676490783691|0.31929612159729004|0.24623417854309082|0.16981244087219238|0.16688156127929688|0.0017588138580322266|0.0015652179718017578|**0.0015361309051513672**
+few-large|0.028592824935913086|0.027452468872070312|0.029271841049194336|0.15716552734375|0.19743132591247559|0.220017671585083|0.024496078491210938|**0.024237394332885742**|0.024244308471679688
+
+The above suggests a good heuristic is: "the more parallelism capabilities, the larger the overhead". Threading allows for efficient sharing of large objects, but is almost as slow as multiprocessing for small objects. Native python coroutines have effectively free communication, but no parallelism, wheras processes have completely indepent python interpreters running in parallel in best case, but significant overhead copying large and small objects around.
