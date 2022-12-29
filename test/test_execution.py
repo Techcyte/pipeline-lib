@@ -359,7 +359,8 @@ def test_many_packets_correctness():
         PipelineTask(save_results),
     ]
     execute(tasks)
-    actual_result = sum(load_results())
+    results = load_results()
+    actual_result = sum(results)
     expected_result = 450135000
     assert actual_result == expected_result
 
@@ -423,4 +424,4 @@ def test_big_messages(n_procs: int, packets_in_flight: int):
 
 
 if __name__ == "__main__":
-    test_big_messages(1, 4)
+    test_many_packets_correctness()

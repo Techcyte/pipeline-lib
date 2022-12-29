@@ -11,11 +11,10 @@ requires-python = ">=3.8"
 classifiers = [
     "Programming Language :: Python :: 3",
 ]
-dependencies = [
-    "numpy",
-]
+dependencies = []
 [project.optional-dependencies]
 dev = [
+    "numpy",
     "pytest",
     "black",
     "pylint",

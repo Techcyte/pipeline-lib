@@ -2,12 +2,12 @@ import ctypes
 import multiprocessing as mp
 import multiprocessing.connection as mp_connection
 import pickle
+import queue
 import traceback
 from dataclasses import dataclass
 from multiprocessing import synchronize
+from multiprocessing.context import BaseContext
 from typing import Any, Iterable, List
-
-import numpy as np
 
 from .pipeline_task import PipelineTask
 from .type_checking import MAX_NUM_WORKERS, type_check_tasks
@@ -51,6 +51,7 @@ class BufferedQueue:
     2. Even if producer process dies, the message is still avaliable to consume (only possible in ordinary queue if the message is placed fully in the mp.Pipe hardcoded 64kb buffer)
     3. No extra thread (on producer) is needed to send data to consumer
     4. Buffered communication between processes occurs fully asynchronously (vs back and forth queue message passing between spawned producer thread and consumer)
+    5. One queue buffered read can process concurrently with one write
 
     Disadvantage:
 
@@ -66,25 +67,32 @@ class BufferedQueue:
     commit 82e01b395e736e5c1cdaae7e1bd8a7dca3f78435 vs commit 89111ffea55063fd40f1894315b8c26673cbe6ce
     """
 
-    def __init__(self, buf_size: int, max_num_elements: int) -> None:
+    def __init__(self, buf_size: int, max_num_elements: int, ctx: BaseContext) -> None:
         self.max_num_elements = max_num_elements
         self.orig_buf_size = buf_size
         # round buffer size up to align size so that every packets buffer starts as aligned
         self.buf_size = roundup_to_align(buf_size)
-        self._pickle_data = mp.RawArray(ctypes.c_byte, buf_size * self.max_num_elements)
-        self._out_of_band_data = mp.RawArray(
+        self._pickle_data = ctx.RawArray(
             ctypes.c_byte, buf_size * self.max_num_elements
         )
-        self.buf_sizes = mp.RawArray(ctypes.c_int, self.max_num_elements)
-        self.first_item_pos = mp.Value("i", 0, lock=False)
-        self.last_item_pos = mp.Value("i", 0, lock=False)
-        self.lock = mp.Lock()
+        self._out_of_band_data = ctx.RawArray(
+            ctypes.c_byte, buf_size * self.max_num_elements
+        )
+        self.buf_sizes = ctx.RawArray(ctypes.c_int, self.max_num_elements)
+        self.first_item_pos = ctx.Value(ctypes.c_int, 0, lock=False)
+        self.last_item_pos = ctx.Value(ctypes.c_int, 0, lock=False)
+        # put, get, and __len__ all require synchonized access to the two position variables
+        self.position_lock = ctx.Lock()
+        # writing and reading must happen one at a time, but reading and writing can occur synchronously, except for the position update
+        self.write_lock = ctx.Lock()
+        self.read_lock = ctx.Lock()
 
     def put(self, item: Any):
-        with self.lock:
-            write_pos = int(self.first_item_pos.value)
-            new_pos = (write_pos + 1) % self.max_num_elements
-            self.first_item_pos.value = new_pos
+        with self.write_lock:
+            with self.position_lock:
+                write_pos = int(self.first_item_pos.value)
+                new_pos = (write_pos + 1) % self.max_num_elements
+                self.first_item_pos.value = new_pos
 
             block_start = write_pos * self.buf_size
 
@@ -93,39 +101,41 @@ class BufferedQueue:
                 protocol=pickle.HIGHEST_PROTOCOL,
                 buffer_callback=self.make_buffer_callback(write_pos),
             )
+            # this needs to be inside lock, so unfortunately all pickling needs to be inside lock as well
+            self.buf_sizes[write_pos] = len(item_bytes)
+
             if len(item_bytes) > self.buf_size:
                 raise ValueError(
                     f"Tried to pass item which picked to size {len(item_bytes)}, but PipelineTask.max_message_size is {self.orig_buf_size}"
                 )
-            # uses numpy to cast all memory buffers to the same width. 
-            # TODO: look at a less heavy way to change memoryviews to 1 byte elements
-            pickled_view = np.frombuffer(item_bytes, dtype="uint8")
-            mem_view = np.frombuffer(self._pickle_data, dtype="uint8")
+            pickled_view = memoryview(item_bytes).cast("b")
+            mem_view = memoryview(self._pickle_data).cast("b")
             mem_view[block_start : block_start + len(item_bytes)] = pickled_view
 
-            # this needs to be inside lock, so unfortunately all pickling needs to be inside lock as well
-            self.buf_sizes[write_pos] = len(item_bytes)
-
     def get(self):
-        with self.lock:
-            read_pos = int(self.last_item_pos.value)
-            new_pos = (read_pos + 1) % self.max_num_elements
-            self.last_item_pos.value = new_pos
+        with self.read_lock:
+            with self.position_lock:
+                read_pos = int(self.last_item_pos.value)
+                next_write_pos = int(self.first_item_pos.value)
+                if read_pos == next_write_pos:
+                    raise queue.Empty()
+                new_pos = (read_pos + 1) % self.max_num_elements
+                self.last_item_pos.value = new_pos
 
+            # no producers should be writing to this queue entry due to datastream semaphores
             num_bytes = int(self.buf_sizes[read_pos])
             read_block = read_pos * self.buf_size
-            mem_view = np.frombuffer(self._pickle_data, dtype="uint8")
+            mem_view = memoryview(self._pickle_data).cast("b")
             data_bytes = mem_view[read_block : read_block + num_bytes]
 
-            # TODO: for some reason, data is corrupted if this is not inside "lock" block, despite semaphore guards
             loaded_data = pickle.loads(
                 data_bytes, buffers=self.iter_stored_buffers(read_pos)
             )
             return loaded_data
 
     def make_buffer_callback(self, write_pos):
-        out_of_band_view = np.frombuffer(self._out_of_band_data, dtype="uint8")
-        out_of_band_size_view = np.frombuffer(self._out_of_band_data, dtype="int32")
+        out_of_band_view = memoryview(self._out_of_band_data).cast("b")
+        out_of_band_size_view = memoryview(self._out_of_band_data).cast("b").cast("i")
 
         start_pos = write_pos * self.buf_size
         # zero out starting marker
@@ -134,7 +144,7 @@ class BufferedQueue:
         cur_block_pos = Value(start_pos)
 
         def format_buffer(buf_obj):
-            src_obj = np.frombuffer(buf_obj, dtype=np.uint8)
+            src_obj = memoryview(buf_obj).cast("b")
             # print(len(src_len))
             src_len = len(src_obj)
             cur_pos = cur_block_pos.value
@@ -160,8 +170,8 @@ class BufferedQueue:
         return format_buffer
 
     def iter_stored_buffers(self, read_pos):
-        out_of_band_view = np.frombuffer(self._out_of_band_data, dtype="uint8")
-        out_of_band_size_view = np.frombuffer(self._out_of_band_data, dtype="int32")
+        out_of_band_view = memoryview(self._out_of_band_data).cast("b")
+        out_of_band_size_view = memoryview(self._out_of_band_data).cast("b").cast("i")
         cur_pos = read_pos * self.buf_size
         end_pos = (read_pos + 1) * self.buf_size
         while cur_pos < end_pos:
@@ -170,18 +180,20 @@ class BufferedQueue:
                 break
             # a copy is required because the shared memory will be mutating after this returns
             # TODO: check if this is actually required given the "packets in flight concept"
-            out_buffer = out_of_band_view[
-                ALIGN_SIZE + cur_pos : ALIGN_SIZE + cur_pos + chunk_size
-            ].copy()
+            # which should ideally mean that a consumer and a producer are never working on the same
+            # packet index at the same time
+            out_buffer = bytes(
+                out_of_band_view[
+                    ALIGN_SIZE + cur_pos : ALIGN_SIZE + cur_pos + chunk_size
+                ]
+            )
             yield out_buffer
             cur_pos += roundup_to_align(ALIGN_SIZE + chunk_size)
 
     def __len__(self):
-        with self.lock:
+        with self.position_lock:
             return (
-                self.last_item_pos.value
-                - self.first_item_pos.value
-                + self.max_num_elements
+                self.last_item_pos.value - self.first_item_pos.value
             ) % self.max_num_elements
 
 
@@ -192,14 +204,15 @@ class TaskOutput:
         packets_in_flight: int,
         error_info: BufferedQueue,
         max_message_size: int,
+        ctx: BaseContext,
     ) -> None:
-        self.num_tasks_remaining = mp.Value("i", num_upstream_tasks, lock=True)
-        self.queue_len = mp.Semaphore(value=0)
-        self.packets_space = mp.Semaphore(value=packets_in_flight)
+        self.num_tasks_remaining = ctx.Value("i", num_upstream_tasks, lock=True)
+        self.queue_len = ctx.Semaphore(value=0)
+        self.packets_space = ctx.Semaphore(value=packets_in_flight)
         # using a custom queue implementation rather than multiprocessing.queue
         # because mp.Queue has strange synchronization properties with the semaphores, leading to many bugs
-        self.queue = BufferedQueue(max_message_size, packets_in_flight + 1)
-        self.has_error = mp.Event()
+        self.queue = BufferedQueue(max_message_size, packets_in_flight + 1, ctx)
+        self.has_error = ctx.Event()
         self.error_info = error_info
 
     def iter_results(self) -> Iterable[Any]:
@@ -208,10 +221,12 @@ class TaskOutput:
             if self.has_error.is_set():
                 raise PropogateErr()
 
-            # only happens when out of results
-            if len(self.queue) == 0:
+            try:
+                item = self.queue.get()
+            except queue.Empty:
+                # only occurs if error occured or no more producers left
                 break
-            item = self.queue.get()
+
             yield item
 
             # this release needs to happen after the yield
@@ -327,12 +342,14 @@ def execute(tasks: List[PipelineTask]):
         _start_singleton(tasks[0])
         return
 
+    ctx = mp.get_context("fork")
+
     source_task = tasks[0]
     sink_task = tasks[-1]
     worker_tasks = tasks[1:-1]
 
     n_total_tasks = sum(task.num_workers for task in tasks)
-    err_queue = BufferedQueue(ERR_BUF_SIZE, n_total_tasks + 2)
+    err_queue = BufferedQueue(ERR_BUF_SIZE, n_total_tasks + 2, ctx)
     # number of processes are of the producing task
     data_streams = [
         TaskOutput(
@@ -340,11 +357,12 @@ def execute(tasks: List[PipelineTask]):
             t.packets_in_flight,
             err_queue,
             max_message_size=t.max_message_size,
+            ctx=ctx,
         )
         for t in tasks[:-1]
     ]
     processes: List[mp.Process] = [
-        mp.Process(
+        ctx.Process(
             target=_start_source,
             args=(source_task, data_streams[0]),
             name=f"{source_task}_{worker_idx}",
@@ -354,7 +372,7 @@ def execute(tasks: List[PipelineTask]):
     for i, worker_task in enumerate(worker_tasks):
         for worker_idx in range(worker_task.num_workers):
             processes.append(
-                mp.Process(
+                ctx.Process(
                     target=_start_worker,
                     args=(worker_task, data_streams[i], data_streams[i + 1]),
                     name=f"{worker_task}_{worker_idx}",
@@ -363,7 +381,7 @@ def execute(tasks: List[PipelineTask]):
 
     for worker_idx in range(sink_task.num_workers):
         processes.append(
-            mp.Process(
+            ctx.Process(
                 target=_start_sink,
                 args=(sink_task, data_streams[-1]),
                 name=f"{sink_task}_{worker_idx}",
@@ -381,6 +399,9 @@ def execute(tasks: List[PipelineTask]):
             done_sentinels = mp_connection.wait(list(sentinel_set))
             sentinel_set -= set(done_sentinels)
             for done_id in done_sentinels:
+                # for some reason needs a join, or the exitcode doesn't sync properly
+                # but it has already exited, so this should finish very quickly
+                sentinel_map[done_id].join()
                 # attempts to catch segfaults and other errors that cannot be caught by python (i.g. sigkill)
                 if sentinel_map[done_id].exitcode != 0:
                     proc_err_msg = f"Process: {sentinel_map[done_id].name} exited with non-zero code {sentinel_map[done_id].exitcode}"
