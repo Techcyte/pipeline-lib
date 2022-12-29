@@ -3,6 +3,7 @@ import os
 import pickle
 import signal
 import time
+import typing
 from contextlib import contextmanager
 from typing import Any, Dict
 
@@ -11,8 +12,11 @@ import pytest
 
 import pipeline_executor
 from pipeline_executor import PipelineTask, execute
+from pipeline_executor.execution import ParallelismStrategy
 
 from .example_funcs import *
+
+all_parallelism_options = typing.get_args(ParallelismStrategy)
 
 TEMP_FILE = "/tmp/pipeline_pickle"
 
@@ -27,7 +31,8 @@ def load_results():
         return pickle.load(file)
 
 
-def test_execute():
+@pytest.mark.parametrize("parallelism", all_parallelism_options)
+def test_execute(parallelism: ParallelismStrategy):
     tasks = [
         PipelineTask(
             generate_numbers,
@@ -43,7 +48,7 @@ def test_execute():
             print_numbers,
         ),
     ]
-    execute(tasks)
+    execute(tasks, parallelism)
 
 
 @contextmanager
@@ -79,7 +84,8 @@ def raise_exception_fn(arg: Iterable[int]) -> Iterable[int]:
     raise TestExpectedException()
 
 
-def test_execute_exception():
+@pytest.mark.parametrize("parallelism", all_parallelism_options)
+def test_execute_exception(parallelism: ParallelismStrategy):
     tasks = [
         PipelineTask(
             generate_numbers,
@@ -92,7 +98,7 @@ def test_execute_exception():
         ),
     ]
     with raises_from(TestExpectedException):
-        execute(tasks)
+        execute(tasks, parallelism)
 
 
 class SuddenExit(RuntimeError):
@@ -106,7 +112,8 @@ def sudden_exit_fn(arg: Iterable[int]) -> Iterable[int]:
     raise SuddenExit("sudden exit")
 
 
-def test_sudden_exit_middle():
+@pytest.mark.parametrize("parallelism", all_parallelism_options)
+def test_sudden_exit_middle(parallelism: ParallelismStrategy):
     tasks = [
         PipelineTask(
             generate_numbers,
@@ -119,10 +126,11 @@ def test_sudden_exit_middle():
         ),
     ]
     with raises_from(SuddenExit):
-        execute(tasks)
+        execute(tasks, parallelism)
 
 
-def test_sudden_exit_end():
+@pytest.mark.parametrize("parallelism", all_parallelism_options)
+def test_sudden_exit_end(parallelism: ParallelismStrategy):
     tasks = [
         PipelineTask(
             generate_numbers,
@@ -133,7 +141,7 @@ def test_sudden_exit_end():
         PipelineTask(save_results),
     ]
     with raises_from(SuddenExit):
-        execute(tasks)
+        execute(tasks, parallelism)
 
 
 def sleeper(vals: Iterable[int]) -> Iterable[int]:
@@ -143,7 +151,8 @@ def sleeper(vals: Iterable[int]) -> Iterable[int]:
         yield i
 
 
-def test_sudden_exit_middle_sleepers():
+@pytest.mark.parametrize("parallelism", all_parallelism_options)
+def test_sudden_exit_middle_sleepers(parallelism: ParallelismStrategy):
     tasks = [
         PipelineTask(
             generate_numbers,
@@ -158,10 +167,11 @@ def test_sudden_exit_middle_sleepers():
         ),
     ]
     with raises_from(SuddenExit):
-        execute(tasks)
+        execute(tasks, parallelism)
 
 
-def test_full_contents_buffering():
+@pytest.mark.parametrize("parallelism", all_parallelism_options)
+def test_full_contents_buffering(parallelism: ParallelismStrategy):
     tasks = [
         PipelineTask(
             generate_numbers,
@@ -172,7 +182,7 @@ def test_full_contents_buffering():
             print_numbers,
         ),
     ]
-    execute(tasks)
+    execute(tasks, parallelism)
 
 
 def add_one_to(vals: Iterable[int], value: mp.Value) -> Iterable[int]:
@@ -189,7 +199,8 @@ def sub_one_to(vals: Iterable[int], value: mp.Value) -> Iterable[int]:
         yield v
 
 
-def test_full_synchronization():
+@pytest.mark.parametrize("parallelism", all_parallelism_options)
+def test_full_synchronization(parallelism: ParallelismStrategy):
     val = mp.Value("i", 0)
     tasks = [
         PipelineTask(
@@ -200,7 +211,7 @@ def test_full_synchronization():
         PipelineTask(sub_one_to, packets_in_flight=1, constants=dict(value=val)),
         PipelineTask(print_numbers, packets_in_flight=1),
     ]
-    execute(tasks)
+    execute(tasks, parallelism)
 
 
 def only_error_if_second_proc(
@@ -222,7 +233,8 @@ def generate_infinite() -> Iterable[int]:
     yield from range(10000000000000)
 
 
-def test_single_worker_error():
+@pytest.mark.parametrize("parallelism", ["thread", "process"])
+def test_single_worker_error(parallelism: ParallelismStrategy):
     """
     if one process dies and the others do not, then it should still raise an exception,
     as the dead process might have consumed an important message
@@ -243,7 +255,7 @@ def test_single_worker_error():
         PipelineTask(print_numbers, num_workers=2, packets_in_flight=2),
     ]
     with raises_from(TestExpectedException):
-        execute(tasks)
+        execute(tasks, parallelism)
 
 
 def force_exit_if_second_proc(
@@ -283,15 +295,16 @@ def test_single_worker_unexpected_exit():
         ),
         PipelineTask(print_numbers, num_workers=2, packets_in_flight=2),
     ]
-    with raises_from(pipeline_executor.execution.TaskError):
-        execute(tasks)
+    with raises_from(pipeline_executor.pipeline_task.TaskError):
+        execute(tasks, parallelism="process")
 
 
 def generate_many() -> Iterable[int]:
     yield from range(30000)
 
 
-def test_many_workers_correctness():
+@pytest.mark.parametrize("parallelism", all_parallelism_options)
+def test_many_workers_correctness(parallelism: ParallelismStrategy):
     """
     Tests that many workers working on lots of data
     eventually returns the correct result, without packet loss or exceptions
@@ -321,13 +334,14 @@ def test_many_workers_correctness():
         ),
         PipelineTask(save_results),
     ]
-    execute(tasks)
+    execute(tasks, parallelism)
     actual_result = sum(load_results())
     expected_result = 450135000
     assert actual_result == expected_result
 
 
-def test_many_packets_correctness():
+@pytest.mark.parametrize("parallelism", all_parallelism_options)
+def test_many_packets_correctness(parallelism: ParallelismStrategy):
     """
     Tests that many workers working on lots of data
     eventually returns the correct result, without packet loss or exceptions
@@ -358,7 +372,7 @@ def test_many_packets_correctness():
         ),
         PipelineTask(save_results),
     ]
-    execute(tasks)
+    execute(tasks, parallelism)
     results = load_results()
     actual_result = sum(results)
     expected_result = 450135000
@@ -396,28 +410,30 @@ def sum_arrays(messages: Iterable[Dict[str, Any]]) -> Iterable[int]:
         )
 
 
+@pytest.mark.parametrize("parallelism", all_parallelism_options)
 @pytest.mark.parametrize("n_procs,packets_in_flight", [(1, 1), (1, 4), (4, 16)])
-def test_big_messages(n_procs: int, packets_in_flight: int):
-    execute(
-        [
-            PipelineTask(
-                generate_large_messages,
-                max_message_size=BIG_MESSAGE_BYTES,
-            ),
-            PipelineTask(
-                process_message,
-                max_message_size=BIG_MESSAGE_BYTES,
-                num_workers=n_procs,
-                packets_in_flight=packets_in_flight,
-            ),
-            PipelineTask(
-                sum_arrays,
-                num_workers=n_procs,
-                packets_in_flight=packets_in_flight,
-            ),
-            PipelineTask(save_results),
-        ]
-    )
+def test_many_packets_correctness(
+    n_procs: int, packets_in_flight: int, parallelism: ParallelismStrategy
+):
+    tasks = [
+        PipelineTask(
+            generate_large_messages,
+            max_message_size=BIG_MESSAGE_BYTES,
+        ),
+        PipelineTask(
+            process_message,
+            max_message_size=BIG_MESSAGE_BYTES,
+            num_workers=n_procs,
+            packets_in_flight=packets_in_flight,
+        ),
+        PipelineTask(
+            sum_arrays,
+            num_workers=n_procs,
+            packets_in_flight=packets_in_flight,
+        ),
+        PipelineTask(save_results),
+    ]
+    execute(tasks, parallelism)
     actual_result = sum(load_results())
     expected_result = 4002577512500
     assert actual_result == expected_result

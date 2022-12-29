@@ -36,7 +36,7 @@ def consume_messages(messages: Iterable[Dict[str, Any]]) -> None:
         pass
 
 
-def run_big_messages(n_procs: int, packets_in_flight: int):
+def run_big_messages(n_procs: int, packets_in_flight: int, parallelism_type: str):
     execute(
         [
             PipelineTask(
@@ -54,11 +54,12 @@ def run_big_messages(n_procs: int, packets_in_flight: int):
                 num_workers=n_procs,
                 packets_in_flight=packets_in_flight,
             ),
-        ]
+        ],
+        parallelism_type,
     )
 
 
-def run_small_messages(n_procs: int, packets_in_flight: int):
+def run_small_messages(n_procs: int, packets_in_flight: int, parallelism_type: str):
     execute(
         [
             PipelineTask(
@@ -75,7 +76,8 @@ def run_small_messages(n_procs: int, packets_in_flight: int):
                 num_workers=n_procs,
                 packets_in_flight=packets_in_flight,
             ),
-        ]
+        ],
+        parallelism_type,
     )
 
 
@@ -84,23 +86,28 @@ class ParameterCombination:
     n_procs: int
     packets_in_flight: int
     name: str
+    parallel_type: str
 
 
 def benchmark_execution():
     parameter_combinations = [
-        ParameterCombination(1, 1, "sequential"),
-        ParameterCombination(1, 4, "buffered"),
-        ParameterCombination(4, 12, "parallel"),
+        comb
+        for parallel_type in ["thread", "process", "coroutine"]
+        for comb in [
+            ParameterCombination(1, 1, "sequential", parallel_type),
+            ParameterCombination(1, 4, "buffered", parallel_type),
+            ParameterCombination(4, 12, "parallel", parallel_type),
+        ]
     ]
     functions = [run_small_messages, run_big_messages]
     markdown_lines = []
-    markdown_lines.append("|".join(comb.name for comb in parameter_combinations))
+    markdown_lines.append("|".join(f"{comb.name}-{comb.parallel_type}" for comb in parameter_combinations))
     markdown_lines.append("|".join("---" for _ in parameter_combinations))
     for run_fn in functions:
         results = []
         for comb in parameter_combinations:
             start_t = time.time()
-            run_fn(comb.n_procs, comb.packets_in_flight)
+            run_fn(comb.n_procs, comb.packets_in_flight, comb.parallel_type)
             end_t = time.time()
             results.append(end_t - start_t)
         max_val = min(results)
