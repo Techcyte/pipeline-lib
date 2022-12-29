@@ -363,4 +363,4 @@ def test_many_packets_correctness():
 
 
 if __name__ == "__main__":
-    test_single_worker_unexpected_exit()
+    test_execute()

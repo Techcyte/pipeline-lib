@@ -3,13 +3,20 @@ import multiprocessing as mp
 import multiprocessing.connection as mp_connection
 import pickle
 import traceback
+from dataclasses import dataclass
 from multiprocessing import synchronize
 from typing import Any, Iterable, List
+
+import numpy as np
 
 from .pipeline_task import PipelineTask
 from .type_checking import MAX_NUM_WORKERS, type_check_tasks
 
 ERR_BUF_SIZE = 2**17
+# some arbitrary, hopefully unused number that signals python exiting after placing the error in the queue
+PYTHON_ERR_EXIT_CODE = 187
+# copies are much faster if they are aligned to 16 byte or 32 byte boundaries (depending on archtecture)
+ALIGN_SIZE = 32
 
 
 class TaskError(RuntimeError):
@@ -17,35 +24,138 @@ class TaskError(RuntimeError):
 
 
 class PropogateErr(RuntimeError):
+    # should never be raised in main scope, meant to act as a proxy
+    # for propogating errors up and down the pipeline
     pass
 
 
+@dataclass
+class Value:
+    value: Any
+
+
+def roundup_to_align(size):
+    return size + (-size) % ALIGN_SIZE
+
+
+tot_time = 0
+
+
 class BufferedQueue:
+    """
+    A custom queue implementation based on fixed-size shared memory buffers to transfer data.
+
+    Advantages over standard library multiprocessing.Queue:
+
+    1. Objects, once placed on the queue can be fetched immidiately without delay (mp.Queue `put` function returns immidiately after spawning the "sender" thread, so there can be a delay before the message is readable from the queue)
+    2. Even if producer process dies, the message is still avaliable to consume (only possible in ordinary queue if the message is placed fully in the mp.Pipe hardcoded 64kb buffer)
+    3. No extra thread (on producer) is needed to send data to consumer
+    4. Large volume communication between processes occurs fully asynchronously (vs back and forth queue message passing)
+    5. Large buffer copys are aligned to 32 byte boundaries, making copies quite fast (benchmarked at 4gb/s throughput, about 20% of max, almost 100x faster than queue)
+
+    Disadvantage:
+
+    1. Doesn't work well if messages can be arbitrarily large
+    2. Requires significant number of file handles
+
+    Note that the complexities around using picke protocol version 5 buffer_callback
+    overrides are significant, but according to the benchmark in `run_benchmark.py`, it
+    is 100x faster for large buffers. For apples to apples comparison,
+
+    """
+
     def __init__(self, buf_size: int, max_num_elements: int) -> None:
-        self.max_num_elements = max_num_elements + 2
-        self.buf_size = buf_size
-        self._raw_data = mp.RawArray(ctypes.c_byte, buf_size * self.max_num_elements)
+        self.max_num_elements = max_num_elements
+        self.orig_buf_size = buf_size
+        # round buffer size up to align size so that every packets buffer starts as aligned
+        self.buf_size = roundup_to_align(buf_size)
+        self._pickle_data = mp.RawArray(ctypes.c_byte, buf_size * self.max_num_elements)
+        self._out_of_band_data = mp.RawArray(
+            ctypes.c_byte, buf_size * self.max_num_elements
+        )
         self.buf_sizes = mp.RawArray(ctypes.c_int, self.max_num_elements)
         self.first_item_pos = mp.Value("i", 0, lock=False)
         self.last_item_pos = mp.Value("i", 0, lock=False)
         self.lock = mp.Lock()
 
     def put(self, item: Any):
-        item_bytes = pickle.dumps(item)
-        if len(item_bytes) > self.buf_size:
-            raise ValueError(
-                f"Tried to pass item of size {len(item_bytes)} but max message size is {self.buf_size}"
-            )
         with self.lock:
             write_pos = int(self.first_item_pos.value)
             new_pos = (write_pos + 1) % self.max_num_elements
             self.first_item_pos.value = new_pos
 
-            self.buf_sizes[write_pos] = len(item_bytes)
             block_start = write_pos * self.buf_size
-            self._raw_data[block_start : block_start + len(item_bytes)] = item_bytes
+
+            item_bytes = pickle.dumps(
+                item,
+                protocol=pickle.HIGHEST_PROTOCOL,
+                buffer_callback=self.make_format_callback(write_pos),
+            )
+            if len(item_bytes) > self.buf_size:
+                raise ValueError(
+                    f"Tried to pass item which picked to size {len(item_bytes)}, but PipelineTask.max_message_size is {self.orig_buf_size}"
+                )
+
+            pickled_view = np.frombuffer(item_bytes, dtype="uint8")
+            mem_view = np.frombuffer(self._pickle_data, dtype="uint8")
+            mem_view[block_start : block_start + len(item_bytes)] = pickled_view
+            self.buf_sizes[write_pos] = len(item_bytes)
+
+    def make_format_callback(self, write_pos):
+        out_of_band_view = np.frombuffer(self._out_of_band_data, dtype="uint8")
+        out_of_band_size_view = np.frombuffer(self._out_of_band_data, dtype="int32")
+
+        start_pos = write_pos * self.buf_size
+        # zero out starting marker
+        out_of_band_size_view[start_pos // 4] = 0
+
+        cur_block_pos = Value(start_pos)
+
+        def format_data(buf_obj):
+            src_obj = np.frombuffer(buf_obj, dtype=np.uint8)
+            # print(len(src_len))
+            src_len = len(src_obj)
+            cur_pos = cur_block_pos.value
+            next_pos = cur_pos + roundup_to_align(ALIGN_SIZE + src_len)
+            if next_pos - start_pos > self.buf_size:
+                raise ValueError(
+                    f"Serialized numpy data coming out to size at least {next_pos - start_pos} in size, but PipelineTask.max_message_size is {self.orig_buf_size}"
+                )
+            elif next_pos - start_pos < self.buf_size:
+                # mark current end of buffer by zeroing out size information
+                out_of_band_size_view[next_pos // 4] = 0
+
+            # set integer size of next chunk
+            out_of_band_size_view[cur_pos // 4] = src_len
+
+            # set chunk data
+            out_of_band_view[
+                ALIGN_SIZE + cur_pos : ALIGN_SIZE + cur_pos + src_len
+            ] = src_obj
+
+            cur_block_pos.value = next_pos
+
+        return format_data
+
+    def iter_chunks(self, read_pos):
+        out_of_band_view = np.frombuffer(self._out_of_band_data, dtype="uint8")
+        out_of_band_size_view = np.frombuffer(self._out_of_band_data, dtype="int32")
+        cur_pos = read_pos * self.buf_size
+        end_pos = (read_pos + 1) * self.buf_size
+        while cur_pos < end_pos:
+            chunk_size = int(out_of_band_size_view[cur_pos // 4])
+            if chunk_size == 0:
+                break
+            # a copy is required because the shared memory will be mutating after this returns
+            # TODO: check if this is actually required given the "packets in flight concept"
+            out_buffer = out_of_band_view[
+                ALIGN_SIZE + cur_pos : ALIGN_SIZE + cur_pos + chunk_size
+            ].copy()
+            yield out_buffer
+            cur_pos += roundup_to_align(ALIGN_SIZE + chunk_size)
 
     def get(self):
+        # print("getting")
         with self.lock:
             read_pos = int(self.last_item_pos.value)
             new_pos = (read_pos + 1) % self.max_num_elements
@@ -53,11 +163,12 @@ class BufferedQueue:
 
             num_bytes = self.buf_sizes[read_pos]
             read_block = read_pos * self.buf_size
+            mem_view = np.frombuffer(self._pickle_data, dtype="uint8")
             # perform a full copy of the data so that unpickling can be done outside the lock
-            data_bytes = bytes(
-                memoryview(self._raw_data)[read_block : read_block + num_bytes]
-            )
-        return pickle.loads(data_bytes)
+            data_bytes = mem_view[read_block : read_block + num_bytes].tobytes()
+
+            loaded_data = pickle.loads(data_bytes, buffers=self.iter_chunks(read_pos))
+            return loaded_data
 
     def __len__(self):
         with self.lock:
@@ -81,7 +192,7 @@ class TaskOutput:
         self.packets_space = mp.Semaphore(value=packets_in_flight)
         # using a custom queue implementation rather than multiprocessing.queue
         # because mp.Queue has strange synchronization properties with the semaphores, leading to many bugs
-        self.queue = BufferedQueue(max_message_size, packets_in_flight)
+        self.queue = BufferedQueue(max_message_size, packets_in_flight + 1)
         self.has_error = mp.Event()
         self.error_info = error_info
 
@@ -149,10 +260,12 @@ def _start_source(
         constants = {} if task.constants is None else task.constants
         out_iter = task.generator(**constants)
         downstream.put_results(out_iter)
-    except BaseException as err:  # pylint: disable=broad-except
+    except Exception as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
         downstream.set_error(task.name, err, tb_str)
-        # raise err
+        # exiting directly instead of re-raising error, as that would clutter stderr
+        # with duplicate tracebacks
+        exit(PYTHON_ERR_EXIT_CODE)
 
 
 def _start_worker(
@@ -166,12 +279,14 @@ def _start_worker(
         out_iter = task.generator(generator_input, **constants)
         downstream.put_results(out_iter)
 
-    except BaseException as err:  # pylint: disable=broad-except
+    except Exception as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
         # sets upstream and downstream so that error propogates throughout the system
         downstream.set_error(task.name, err, tb_str)
         upstream.set_error(task.name, err, tb_str)
-        # raise err
+        # exiting directly instead of re-raising error, as that would clutter stderr
+        # with duplicate tracebacks
+        exit(PYTHON_ERR_EXIT_CODE)
 
 
 def _start_sink(
@@ -182,10 +297,12 @@ def _start_sink(
         constants = {} if task.constants is None else task.constants
         generator_input = upstream.iter_results()
         task.generator(generator_input, **constants)
-    except BaseException as err:  # pylint: disable=broad-except
+    except Exception as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
         upstream.set_error(task.name, err, tb_str)
-        # raise err
+        # exiting directly instead of re-raising error, as that would clutter stderr
+        # with duplicate tracebacks
+        exit(PYTHON_ERR_EXIT_CODE)
 
 
 def execute(tasks: List[PipelineTask]):
@@ -220,7 +337,6 @@ def execute(tasks: List[PipelineTask]):
         )
         for t in tasks[:-1]
     ]
-    # only one source thread per program
     processes: List[mp.Process] = [
         mp.Process(
             target=_start_source,
@@ -271,12 +387,13 @@ def execute(tasks: List[PipelineTask]):
 
     except BaseException as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
+        has_error = True
         for stream in data_streams:
             stream.set_error("_main_thread", err, tb_str)
 
     finally:
         # joins processes as cleanup if they successfully exited
-        # give them a decent amount of time to cycle through their current task and exit cleanly
+        # give them a decent amount of time to process their current task and exit cleanly
         for proc in processes:
             proc.join(timeout=15.0)
         # escalate, send sigterm to processes
@@ -285,7 +402,7 @@ def execute(tasks: List[PipelineTask]):
         # wait for terminate signal to propogate through the processes
         for proc in processes:
             proc.join(timeout=5.0)
-        # force kill the processes if they failed to terminate cleanly
+        # force kill the processes (only if they are refusing to terminate cleanly)
         for proc in processes:
             proc.kill()
             proc.join()
