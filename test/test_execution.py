@@ -4,7 +4,9 @@ import pickle
 import signal
 import time
 from contextlib import contextmanager
+from typing import Any, Dict
 
+import numpy as np
 import pytest
 
 import pipeline_executor
@@ -362,5 +364,63 @@ def test_many_packets_correctness():
     assert actual_result == expected_result
 
 
+N_BIG_MESSAGES = 100
+BIG_MESSAGE_SIZE = 200000
+BIG_MESSAGE_BYTES = 4 * BIG_MESSAGE_SIZE + 5000
+
+
+def generate_large_messages() -> Iterable[Dict[str, Any]]:
+    for i in range(N_BIG_MESSAGES):
+        val1 = np.arange(BIG_MESSAGE_SIZE, dtype="int32") + i
+        yield {
+            "message_type": "big",
+            "message_1_contents": val1,
+            "val1_ref": val1,
+            "message_2_contents": (np.arange(500, dtype="int64") * i),
+        }
+
+
+def process_message(messages: Iterable[Dict[str, Any]]) -> Iterable[Dict[str, Any]]:
+    for msg in messages:
+        msg["processed"] = True
+        yield msg
+
+
+def sum_arrays(messages: Iterable[Dict[str, Any]]) -> Iterable[int]:
+    for msg in messages:
+        yield (
+            msg["message_1_contents"].sum()
+            + msg["val1_ref"].sum()
+            + msg["message_2_contents"].sum()
+        )
+
+
+@pytest.mark.parametrize("n_procs,packets_in_flight", [(1, 1), (1, 4), (4, 16)])
+def test_big_messages(n_procs: int, packets_in_flight: int):
+    execute(
+        [
+            PipelineTask(
+                generate_large_messages,
+                max_message_size=BIG_MESSAGE_BYTES,
+            ),
+            PipelineTask(
+                process_message,
+                max_message_size=BIG_MESSAGE_BYTES,
+                num_workers=n_procs,
+                packets_in_flight=packets_in_flight,
+            ),
+            PipelineTask(
+                sum_arrays,
+                num_workers=n_procs,
+                packets_in_flight=packets_in_flight,
+            ),
+            PipelineTask(save_results),
+        ]
+    )
+    actual_result = sum(load_results())
+    expected_result = 4002577512500
+    assert actual_result == expected_result
+
+
 if __name__ == "__main__":
-    test_execute()
+    test_big_messages(1, 4)

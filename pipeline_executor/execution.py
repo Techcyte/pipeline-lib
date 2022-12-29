@@ -50,18 +50,20 @@ class BufferedQueue:
     1. Objects, once placed on the queue can be fetched immidiately without delay (mp.Queue `put` function returns immidiately after spawning the "sender" thread, so there can be a delay before the message is readable from the queue)
     2. Even if producer process dies, the message is still avaliable to consume (only possible in ordinary queue if the message is placed fully in the mp.Pipe hardcoded 64kb buffer)
     3. No extra thread (on producer) is needed to send data to consumer
-    4. Large volume communication between processes occurs fully asynchronously (vs back and forth queue message passing)
-    5. Large buffer copys are aligned to 32 byte boundaries, making copies quite fast (benchmarked at 4gb/s throughput, about 20% of max, almost 100x faster than queue)
+    4. Buffered communication between processes occurs fully asynchronously (vs back and forth queue message passing between spawned producer thread and consumer)
 
     Disadvantage:
 
     1. Doesn't work well if messages can be arbitrarily large
     2. Requires significant number of file handles
 
-    Note that the complexities around using picke protocol version 5 buffer_callback
-    overrides are significant, but according to the benchmark in `run_benchmark.py`, it
-    is 100x faster for large buffers. For apples to apples comparison,
-
+    Additionally, this library makes use of the pickly protocol v5's
+    buffer interface in `make_buffer_callback` and `iter_stored_buffers` methods.
+    This is to support fast copies of numpy arrays, and other buffers.
+    It was chosen over the default numpy serialization method for performance.
+    According to the benchmark in `run_benchmark.py`, it
+    is 100x faster for large buffers. For apples to apples comparison, look at how the benchmark performs in
+    commit 82e01b395e736e5c1cdaae7e1bd8a7dca3f78435 vs commit 89111ffea55063fd40f1894315b8c26673cbe6ce
     """
 
     def __init__(self, buf_size: int, max_num_elements: int) -> None:
@@ -89,19 +91,39 @@ class BufferedQueue:
             item_bytes = pickle.dumps(
                 item,
                 protocol=pickle.HIGHEST_PROTOCOL,
-                buffer_callback=self.make_format_callback(write_pos),
+                buffer_callback=self.make_buffer_callback(write_pos),
             )
             if len(item_bytes) > self.buf_size:
                 raise ValueError(
                     f"Tried to pass item which picked to size {len(item_bytes)}, but PipelineTask.max_message_size is {self.orig_buf_size}"
                 )
-
+            # uses numpy to cast all memory buffers to the same width. 
+            # TODO: look at a less heavy way to change memoryviews to 1 byte elements
             pickled_view = np.frombuffer(item_bytes, dtype="uint8")
             mem_view = np.frombuffer(self._pickle_data, dtype="uint8")
             mem_view[block_start : block_start + len(item_bytes)] = pickled_view
+
+            # this needs to be inside lock, so unfortunately all pickling needs to be inside lock as well
             self.buf_sizes[write_pos] = len(item_bytes)
 
-    def make_format_callback(self, write_pos):
+    def get(self):
+        with self.lock:
+            read_pos = int(self.last_item_pos.value)
+            new_pos = (read_pos + 1) % self.max_num_elements
+            self.last_item_pos.value = new_pos
+
+            num_bytes = int(self.buf_sizes[read_pos])
+            read_block = read_pos * self.buf_size
+            mem_view = np.frombuffer(self._pickle_data, dtype="uint8")
+            data_bytes = mem_view[read_block : read_block + num_bytes]
+
+            # TODO: for some reason, data is corrupted if this is not inside "lock" block, despite semaphore guards
+            loaded_data = pickle.loads(
+                data_bytes, buffers=self.iter_stored_buffers(read_pos)
+            )
+            return loaded_data
+
+    def make_buffer_callback(self, write_pos):
         out_of_band_view = np.frombuffer(self._out_of_band_data, dtype="uint8")
         out_of_band_size_view = np.frombuffer(self._out_of_band_data, dtype="int32")
 
@@ -111,7 +133,7 @@ class BufferedQueue:
 
         cur_block_pos = Value(start_pos)
 
-        def format_data(buf_obj):
+        def format_buffer(buf_obj):
             src_obj = np.frombuffer(buf_obj, dtype=np.uint8)
             # print(len(src_len))
             src_len = len(src_obj)
@@ -135,9 +157,9 @@ class BufferedQueue:
 
             cur_block_pos.value = next_pos
 
-        return format_data
+        return format_buffer
 
-    def iter_chunks(self, read_pos):
+    def iter_stored_buffers(self, read_pos):
         out_of_band_view = np.frombuffer(self._out_of_band_data, dtype="uint8")
         out_of_band_size_view = np.frombuffer(self._out_of_band_data, dtype="int32")
         cur_pos = read_pos * self.buf_size
@@ -153,22 +175,6 @@ class BufferedQueue:
             ].copy()
             yield out_buffer
             cur_pos += roundup_to_align(ALIGN_SIZE + chunk_size)
-
-    def get(self):
-        # print("getting")
-        with self.lock:
-            read_pos = int(self.last_item_pos.value)
-            new_pos = (read_pos + 1) % self.max_num_elements
-            self.last_item_pos.value = new_pos
-
-            num_bytes = self.buf_sizes[read_pos]
-            read_block = read_pos * self.buf_size
-            mem_view = np.frombuffer(self._pickle_data, dtype="uint8")
-            # perform a full copy of the data so that unpickling can be done outside the lock
-            data_bytes = mem_view[read_block : read_block + num_bytes].tobytes()
-
-            loaded_data = pickle.loads(data_bytes, buffers=self.iter_chunks(read_pos))
-            return loaded_data
 
     def __len__(self):
         with self.lock:

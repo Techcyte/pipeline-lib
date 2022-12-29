@@ -18,10 +18,10 @@ def generate_many_messages() -> Iterable[Dict[str, Any]]:
 
 
 def generate_large_messages() -> Iterable[Dict[str, Any]]:
-    for _ in range(N_BIG_MESSAGES):
+    for i in range(N_BIG_MESSAGES):
         yield {
             "message_type": "big",
-            "message_value": np.arange(BIG_MESSAGE_SIZE, dtype="int32"),
+            "message_value": np.arange(BIG_MESSAGE_SIZE, dtype="int32") + i,
         }
 
 
