@@ -1,21 +1,26 @@
-from typing import List, Literal
+from typing import List, Literal, get_args
 
 from .mp_execution import execute_mp
 from .pipeline_task import PipelineTask
 from .seq_execution import execute_seq
 from .tr_execution import execute_tr
 
-ParallelismStrategy = Literal["thread", "process", "coroutine"]
+ParallelismStrategy = Literal["thread", "process-fork", "process-spawn", "coroutine"]
+
+# list of strings in ParallelismStrategy
+PARALLELISM_STRATEGIES: List[str] = get_args(ParallelismStrategy)
 
 
 def execute(tasks: List[PipelineTask], parallelism: ParallelismStrategy = "thread"):
     if parallelism == "thread":
         execute_tr(tasks)
-    elif parallelism == "process":
-        execute_mp(tasks)
+    elif parallelism == "process-spawn":
+        execute_mp(tasks, "spawn")
+    elif parallelism == "process-fork":
+        execute_mp(tasks, "fork")
     elif parallelism == "coroutine":
         execute_seq(tasks)
     else:
         raise ValueError(
-            '`execute`\'s parallelism argument must be one of ["thread", "process", "coroutine"]'
+            f"`execute`'s parallelism argument must be one of {PARALLELISM_STRATEGIES}"
         )

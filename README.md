@@ -134,9 +134,9 @@ There are also some sanity checks on the runtime values
 This gives a rough estimation of how much overhead each parallelism technique has for different workloads. 
 It is produced by running `benchmark/run_benchmark.py`. Results below are on a native linux system on a desktop.
 
-x|sequential-thread|buffered-thread|parallel-thread|sequential-process|buffered-process|parallel-process|sequential-coroutine|buffered-coroutine|parallel-coroutine
----|---|---|---|---|---|---|---|---|---
-many-small|0.16642332077026367|0.12173676490783691|0.31929612159729004|0.24623417854309082|0.16981244087219238|0.16688156127929688|0.0017588138580322266|0.0015652179718017578|**0.0015361309051513672**
-few-large|0.028592824935913086|0.027452468872070312|0.029271841049194336|0.15716552734375|0.19743132591247559|0.220017671585083|0.024496078491210938|**0.024237394332885742**|0.024244308471679688
+x|sequential-thread|buffered-thread|parallel-thread|sequential-process-fork|buffered-process-fork|parallel-process-fork|sequential-process-spawn|buffered-process-spawn|parallel-process-spawn|sequential-coroutine|buffered-coroutine|parallel-coroutine
+---|---|---|---|---|---|---|---|---|---|---|---|---
+many-small|0.5922050476074219|0.5618741512298584|0.5089359283447266|0.8170459270477295|0.5927219390869141|0.6213812828063965|1.0385205745697021|0.7982921600341797|1.0384793281555176|**0.002828359603881836**|0.0400238037109375|0.004428386688232422
+few-large|0.15554547309875488|0.07927966117858887|0.09680747985839844|0.3397235870361328|0.3154258728027344|0.48903417587280273|0.5573196411132812|0.5459458827972412|0.9500305652618408|0.07024836540222168|**0.056780099868774414**|0.05890035629272461
 
 The above suggests a good heuristic is: "the more parallelism capabilities, the larger the overhead". Threading allows for efficient sharing of large objects, but is almost as slow as multiprocessing for small objects. Native python coroutines have effectively free communication, but no parallelism, wheras processes have completely indepent python interpreters running in parallel in best case, but significant overhead copying large and small objects around.

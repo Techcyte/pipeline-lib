@@ -18,16 +18,16 @@ from .example_funcs import *
 
 all_parallelism_options = typing.get_args(ParallelismStrategy)
 
-TEMP_FILE = "/tmp/pipeline_pickle"
+TEMP_FILENAME = "_test_pipeline_pickle.data"
 
 
-def save_results(vals: Iterable[int]) -> None:
-    with open(TEMP_FILE, "wb") as file:
+def save_results(vals: Iterable[int], tmpdir: str) -> None:
+    with open(os.path.join(tmpdir, TEMP_FILENAME), "wb") as file:
         pickle.dump(list(vals), file)
 
 
-def load_results():
-    with open(TEMP_FILE, "rb") as file:
+def load_results(tempdir: str):
+    with open(os.path.join(tempdir, TEMP_FILENAME), "rb") as file:
         return pickle.load(file)
 
 
@@ -138,7 +138,7 @@ def test_sudden_exit_end(parallelism: ParallelismStrategy):
         PipelineTask(
             sudden_exit_fn,
         ),
-        PipelineTask(save_results),
+        PipelineTask(print_numbers),
     ]
     with raises_from(SuddenExit):
         execute(tasks, parallelism)
@@ -201,7 +201,7 @@ def sub_one_to(vals: Iterable[int], value: mp.Value) -> Iterable[int]:
 
 @pytest.mark.parametrize("parallelism", all_parallelism_options)
 def test_full_synchronization(parallelism: ParallelismStrategy):
-    val = mp.Value("i", 0)
+    val = mp.Value("i", 0, lock=False)
     tasks = [
         PipelineTask(
             generate_numbers,
@@ -233,13 +233,14 @@ def generate_infinite() -> Iterable[int]:
     yield from range(10000000000000)
 
 
-@pytest.mark.parametrize("parallelism", ["thread", "process"])
+@pytest.mark.parametrize("parallelism", ["thread", "process-fork", "process-spawn"])
 def test_single_worker_error(parallelism: ParallelismStrategy):
     """
     if one process dies and the others do not, then it should still raise an exception,
     as the dead process might have consumed an important message
     """
-    started_event = mp.Event()
+    mp_context = mp.get_context("spawn") if parallelism == "process-spawn" else mp
+    started_event = mp_context.Event()
     tasks = [
         PipelineTask(
             generate_infinite,
@@ -275,7 +276,8 @@ def force_exit_if_second_proc(
         yield from arg
 
 
-def test_single_worker_unexpected_exit():
+@pytest.mark.parametrize("parallelism", ["process-spawn", "process-fork"])
+def test_single_worker_unexpected_exit(parallelism: ParallelismStrategy):
     """
     if one process dies and the others do not, then it should still raise an exception,
     as the dead process might have consumed an important message
@@ -296,7 +298,7 @@ def test_single_worker_unexpected_exit():
         PipelineTask(print_numbers, num_workers=2, packets_in_flight=2),
     ]
     with raises_from(pipeline_executor.pipeline_task.TaskError):
-        execute(tasks, parallelism="process")
+        execute(tasks, parallelism)
 
 
 def generate_many() -> Iterable[int]:
@@ -304,7 +306,7 @@ def generate_many() -> Iterable[int]:
 
 
 @pytest.mark.parametrize("parallelism", all_parallelism_options)
-def test_many_workers_correctness(parallelism: ParallelismStrategy):
+def test_many_workers_correctness(tmpdir, parallelism: ParallelismStrategy):
     """
     Tests that many workers working on lots of data
     eventually returns the correct result, without packet loss or exceptions
@@ -332,16 +334,16 @@ def test_many_workers_correctness(parallelism: ParallelismStrategy):
             num_workers=16,
             packets_in_flight=20,
         ),
-        PipelineTask(save_results),
+        PipelineTask(save_results, constants=dict(tmpdir=tmpdir)),
     ]
     execute(tasks, parallelism)
-    actual_result = sum(load_results())
+    actual_result = sum(load_results(tmpdir))
     expected_result = 450135000
     assert actual_result == expected_result
 
 
 @pytest.mark.parametrize("parallelism", all_parallelism_options)
-def test_many_packets_correctness(parallelism: ParallelismStrategy):
+def test_many_packets_correctness(tmpdir, parallelism: ParallelismStrategy):
     """
     Tests that many workers working on lots of data
     eventually returns the correct result, without packet loss or exceptions
@@ -370,10 +372,10 @@ def test_many_packets_correctness(parallelism: ParallelismStrategy):
             num_workers=4,
             packets_in_flight=100,
         ),
-        PipelineTask(save_results),
+        PipelineTask(save_results, constants=dict(tmpdir=tmpdir)),
     ]
     execute(tasks, parallelism)
-    results = load_results()
+    results = load_results(tmpdir)
     actual_result = sum(results)
     expected_result = 450135000
     assert actual_result == expected_result
@@ -413,7 +415,7 @@ def sum_arrays(messages: Iterable[Dict[str, Any]]) -> Iterable[int]:
 @pytest.mark.parametrize("parallelism", all_parallelism_options)
 @pytest.mark.parametrize("n_procs,packets_in_flight", [(1, 1), (1, 4), (4, 16)])
 def test_many_packets_correctness(
-    n_procs: int, packets_in_flight: int, parallelism: ParallelismStrategy
+    tmpdir, n_procs: int, packets_in_flight: int, parallelism: ParallelismStrategy
 ):
     tasks = [
         PipelineTask(
@@ -431,13 +433,13 @@ def test_many_packets_correctness(
             num_workers=n_procs,
             packets_in_flight=packets_in_flight,
         ),
-        PipelineTask(save_results),
+        PipelineTask(save_results, constants=dict(tmpdir=tmpdir)),
     ]
     execute(tasks, parallelism)
-    actual_result = sum(load_results())
+    actual_result = sum(load_results(tmpdir))
     expected_result = 4002577512500
     assert actual_result == expected_result
 
 
 if __name__ == "__main__":
-    test_many_packets_correctness()
+    test_single_worker_error("process-spawn")

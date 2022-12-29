@@ -74,20 +74,12 @@ class TaskOutput:
             self.packets_space.release()
 
 
-def _start_singleton(
-    task: PipelineTask,
-):
-    constants = {} if task.constants is None else task.constants
-    task.generator(**constants)
-
-
 def _start_source(
     task: PipelineTask,
     downstream: TaskOutput,
 ):
     try:
-        constants = {} if task.constants is None else task.constants
-        out_iter = task.generator(**constants)
+        out_iter = task.generator(**task.constants_dict)
         downstream.put_results(out_iter)
     except BaseException as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
@@ -117,9 +109,8 @@ def _start_sink(
     upstream: TaskOutput,
 ):
     try:
-        constants = {} if task.constants is None else task.constants
         generator_input = upstream.iter_results()
-        task.generator(generator_input, **constants)
+        task.generator(generator_input, **task.constants_dict)
     except BaseException as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
         upstream.set_error(task.name, err, tb_str)
@@ -148,58 +139,57 @@ def execute_tr(tasks: List[PipelineTask]):
     _warn_parameter_overrides(tasks)
 
     if len(tasks) == 1:
-        _start_singleton(tasks[0])
+        (task,) = tasks
+        task.generator(**task.constants_dict)
+        return
 
-    else:
-        source_task = tasks[0]
-        sink_task = tasks[-1]
-        worker_tasks = tasks[1:-1]
+    source_task = tasks[0]
+    sink_task = tasks[-1]
+    worker_tasks = tasks[1:-1]
 
-        # number of processes are of the producing task
-        data_streams = [
-            TaskOutput(t.num_workers, t.packets_in_flight) for t in tasks[:-1]
-        ]
-        # only one source thread per program
-        threads: List[tr.Thread] = [
-            tr.Thread(target=_start_source, args=(source_task, data_streams[0]))
-        ]
-        for i, worker_task in enumerate(worker_tasks):
-            for _ in range(worker_task.num_workers):
-                threads.append(
-                    tr.Thread(
-                        target=_start_worker,
-                        args=(worker_task, data_streams[i], data_streams[i + 1]),
-                    )
-                )
-
-        for _ in range(sink_task.num_workers):
+    # number of processes are of the producing task
+    data_streams = [TaskOutput(t.num_workers, t.packets_in_flight) for t in tasks[:-1]]
+    # only one source thread per program
+    threads: List[tr.Thread] = [
+        tr.Thread(target=_start_source, args=(source_task, data_streams[0]))
+    ]
+    for i, worker_task in enumerate(worker_tasks):
+        for _ in range(worker_task.num_workers):
             threads.append(
-                tr.Thread(target=_start_sink, args=(sink_task, data_streams[-1]))
+                tr.Thread(
+                    target=_start_worker,
+                    args=(worker_task, data_streams[i], data_streams[i + 1]),
+                )
             )
 
+    for _ in range(sink_task.num_workers):
+        threads.append(
+            tr.Thread(target=_start_sink, args=(sink_task, data_streams[-1]))
+        )
+
+    for thread in threads:
+        thread.start()
+
+    try:
         for thread in threads:
-            thread.start()
+            thread.join()
 
-        try:
-            for thread in threads:
-                thread.join()
-
-        except BaseException as err:
-            # asks all threads to terminate as quickly as possible
-            tb_str = traceback.format_exc()
-            for stream in data_streams:
-                stream.set_error("main_task", err, tb_str)
-            # clean up remaining threads so that main process terminates properly
-            for thread in threads:
-                thread.join()
-            raise err
-
+    except BaseException as err:
+        # asks all threads to terminate as quickly as possible
+        tb_str = traceback.format_exc()
         for stream in data_streams:
-            if stream.error_info is not None and not isinstance(
-                stream.error_info[1], PropogateErr
-            ):
-                # should only be at most one unique error, just raise it
-                task_name, err, traceback_str = stream.error_info
-                raise TaskError(
-                    f"Task; {task_name} errored\n{traceback_str}\n{err}"
-                ) from err
+            stream.set_error("main_task", err, tb_str)
+        # clean up remaining threads so that main process terminates properly
+        for thread in threads:
+            thread.join()
+        raise err
+
+    for stream in data_streams:
+        if stream.error_info is not None and not isinstance(
+            stream.error_info[1], PropogateErr
+        ):
+            # should only be at most one unique error, just raise it
+            task_name, err, traceback_str = stream.error_info
+            raise TaskError(
+                f"Task; {task_name} errored\n{traceback_str}\n{err}"
+            ) from err

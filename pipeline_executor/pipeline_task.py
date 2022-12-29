@@ -33,4 +33,5 @@ class PipelineTask:
 
 class TaskError(RuntimeError):
     """Error for miscelanious, unidentifiable issues that come up during task execution"""
+
     pass

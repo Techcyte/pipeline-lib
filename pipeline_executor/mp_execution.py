@@ -5,9 +5,8 @@ import pickle
 import queue
 import traceback
 from dataclasses import dataclass
-from multiprocessing import synchronize
 from multiprocessing.context import BaseContext
-from typing import Any, Iterable, List
+from typing import Any, Iterable, List, Literal
 
 from .pipeline_task import PipelineTask, TaskError
 from .type_checking import MAX_NUM_WORKERS, type_check_tasks
@@ -17,6 +16,8 @@ ERR_BUF_SIZE = 2**16
 PYTHON_ERR_EXIT_CODE = 187
 # copies are much faster if they are aligned to 16 byte or 32 byte boundaries (depending on archtecture)
 ALIGN_SIZE = 32
+
+SpawnContextName = Literal["spawn", "fork", "forkserver"]
 
 
 class PropogateErr(RuntimeError):
@@ -259,20 +260,12 @@ class TaskOutput:
             self.packets_space.release()
 
 
-def _start_singleton(
-    task: PipelineTask,
-):
-    constants = {} if task.constants is None else task.constants
-    task.generator(**constants)
-
-
 def _start_source(
     task: PipelineTask,
     downstream: TaskOutput,
 ):
     try:
-        constants = {} if task.constants is None else task.constants
-        out_iter = task.generator(**constants)
+        out_iter = task.generator(**task.constants_dict)
         downstream.put_results(out_iter)
     except Exception as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
@@ -288,9 +281,8 @@ def _start_worker(
     downstream: TaskOutput,
 ):
     try:
-        constants = {} if task.constants is None else task.constants
         generator_input = upstream.iter_results()
-        out_iter = task.generator(generator_input, **constants)
+        out_iter = task.generator(generator_input, **task.constants_dict)
         downstream.put_results(out_iter)
 
     except Exception as err:  # pylint: disable=broad-except
@@ -308,9 +300,8 @@ def _start_sink(
     upstream: TaskOutput,
 ):
     try:
-        constants = {} if task.constants is None else task.constants
         generator_input = upstream.iter_results()
-        task.generator(generator_input, **constants)
+        task.generator(generator_input, **task.constants_dict)
     except Exception as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
         upstream.set_error(task.name, err, tb_str)
@@ -319,7 +310,7 @@ def _start_sink(
         exit(PYTHON_ERR_EXIT_CODE)
 
 
-def execute_mp(tasks: List[PipelineTask]):
+def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
     # pylint: disable=too-many-branches,too-many-locals
     """
     execute tasks until final task completes.
@@ -332,10 +323,11 @@ def execute_mp(tasks: List[PipelineTask]):
     type_check_tasks(tasks)
 
     if len(tasks) == 1:
-        _start_singleton(tasks[0])
+        (task,) = tasks
+        task.generator(**task.constants_dict)
         return
 
-    ctx = mp.get_context("fork")
+    ctx = mp.get_context(spawn_method)
 
     source_task = tasks[0]
     sink_task = tasks[-1]

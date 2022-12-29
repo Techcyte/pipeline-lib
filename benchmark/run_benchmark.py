@@ -4,7 +4,7 @@ from typing import Any, Dict, Iterable
 
 import numpy as np
 
-from pipeline_executor import PipelineTask, execute
+from pipeline_executor import PARALLELISM_STRATEGIES, PipelineTask, execute
 
 N_MANY_MESSAGES = 10000
 N_BIG_MESSAGES = 100
@@ -92,7 +92,7 @@ class ParameterCombination:
 def benchmark_execution():
     parameter_combinations = [
         comb
-        for parallel_type in ["thread", "process", "coroutine"]
+        for parallel_type in PARALLELISM_STRATEGIES
         for comb in [
             ParameterCombination(1, 1, "sequential", parallel_type),
             ParameterCombination(1, 4, "buffered", parallel_type),
@@ -101,7 +101,9 @@ def benchmark_execution():
     ]
     functions = [run_small_messages, run_big_messages]
     markdown_lines = []
-    markdown_lines.append("|".join(f"{comb.name}-{comb.parallel_type}" for comb in parameter_combinations))
+    markdown_lines.append(
+        "|".join(f"{comb.name}-{comb.parallel_type}" for comb in parameter_combinations)
+    )
     markdown_lines.append("|".join("---" for _ in parameter_combinations))
     for run_fn in functions:
         results = []

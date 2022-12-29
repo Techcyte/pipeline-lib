@@ -31,7 +31,7 @@ include = ["pipeline_executor"]
 exclude = ["*tests*"]
 
 [tool.black]
-target-version = ['py37']
+target-version = ['py38']
 line-length = 88
 
 [tool.isort]
