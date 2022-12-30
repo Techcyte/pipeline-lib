@@ -134,9 +134,9 @@ There are also some sanity checks on the runtime values
 This gives a rough estimation of how much overhead each parallelism technique has for different workloads. 
 It is produced by running `benchmark/run_benchmark.py`. Results below are on a native linux system on a desktop.
 
-x|sequential-thread|buffered-thread|parallel-thread|sequential-process-fork|buffered-process-fork|parallel-process-fork|sequential-process-spawn|buffered-process-spawn|parallel-process-spawn|sequential-coroutine|buffered-coroutine|parallel-coroutine
----|---|---|---|---|---|---|---|---|---|---|---|---
-many-small|0.5922050476074219|0.5618741512298584|0.5089359283447266|0.8170459270477295|0.5927219390869141|0.6213812828063965|1.0385205745697021|0.7982921600341797|1.0384793281555176|**0.002828359603881836**|0.0400238037109375|0.004428386688232422
-few-large|0.15554547309875488|0.07927966117858887|0.09680747985839844|0.3397235870361328|0.3154258728027344|0.48903417587280273|0.5573196411132812|0.5459458827972412|0.9500305652618408|0.07024836540222168|**0.056780099868774414**|0.05890035629272461
+num messages|message size|sequential-thread|buffered-thread|parallel-thread|sequential-process-fork|buffered-process-fork|parallel-process-fork|sequential-process-spawn|buffered-process-spawn|parallel-process-spawn|sequential-coroutine|buffered-coroutine|parallel-coroutine
+---|---|---|---|---|---|---|---|---|---|---|---|---|---
+100|50000|0.7421092987060547|0.9426014423370361|1.2167184352874756|1.3306736946105957|0.9456183910369873|0.9424421787261963|1.4792447090148926|1.0399765968322754|1.178037166595459|0.006626605987548828|**0.0065424442291259766**|0.006624460220336914
+40000500|100|0.7252142429351807|0.7077171802520752|0.7210838794708252|1.621253490447998|1.7208893299102783|2.283454656600952|1.7601733207702637|1.8722140789031982|2.427269697189331|0.6818287372589111|**0.6789970397949219**|0.6875081062316895
 
 The above suggests a good heuristic is: "the more parallelism capabilities, the larger the overhead". Threading allows for efficient sharing of large objects, but is almost as slow as multiprocessing for small objects. Native python coroutines have effectively free communication, but no parallelism, wheras processes have completely indepent python interpreters running in parallel in best case, but significant overhead copying large and small objects around.

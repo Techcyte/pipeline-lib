@@ -101,12 +101,17 @@ def benchmark_execution():
         ]
     ]
     functions = [run_small_messages, run_big_messages]
+    message_sizes = [100, BIG_MESSAGE_BYTES]
+    num_messages = [N_MANY_MESSAGES, N_BIG_MESSAGES]
     markdown_lines = []
     markdown_lines.append(
-        "|".join(f"{comb.name}-{comb.parallel_type}" for comb in parameter_combinations)
+        "num messages|message size|"
+        + "|".join(
+            f"{comb.name}-{comb.parallel_type}" for comb in parameter_combinations
+        )
     )
-    markdown_lines.append("|".join("---" for _ in parameter_combinations))
-    for run_fn in functions:
+    markdown_lines.append("|".join(["---"] * (len(parameter_combinations) + 2)))
+    for msg_size, n_msgs, run_fn in zip(message_sizes, num_messages, functions):
         results = []
         for comb in parameter_combinations:
             start_t = time.time()
@@ -115,7 +120,8 @@ def benchmark_execution():
             results.append(end_t - start_t)
         max_val = min(results)
         markdown_lines.append(
-            "|".join(f"{res}" if res != max_val else f"**{res}**" for res in results)
+            f"{msg_size}|{n_msgs}|"
+            + "|".join(f"{res}" if res != max_val else f"**{res}**" for res in results)
         )
     return "\n".join(markdown_lines)
 
