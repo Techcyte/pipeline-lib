@@ -177,7 +177,7 @@ def test_full_contents_buffering(parallelism: ParallelismStrategy):
             generate_numbers,
             packets_in_flight=10000,
         ),
-        PipelineTask(sleeper, packets_in_flight=10000),
+        PipelineTask(sleeper, packets_in_flight=10000, max_message_size=1000),
         PipelineTask(
             print_numbers,
         ),
@@ -400,15 +400,17 @@ def generate_large_messages() -> Iterable[Dict[str, Any]]:
 def process_message(messages: Iterable[Dict[str, Any]]) -> Iterable[Dict[str, Any]]:
     for msg in messages:
         msg["processed"] = True
+        # adds 1 to every element in this and its reference in `val1_ref`
+        msg["message_1_contents"] += 1
         yield msg
 
 
 def sum_arrays(messages: Iterable[Dict[str, Any]]) -> Iterable[int]:
     for msg in messages:
         yield (
-            msg["message_1_contents"].sum()
-            + msg["val1_ref"].sum()
-            + msg["message_2_contents"].sum()
+            msg["message_1_contents"].astype("int64").sum()
+            + msg["val1_ref"].astype("int64").sum()
+            + msg["message_2_contents"].astype("int64").sum()
         )
 
 
@@ -437,9 +439,9 @@ def test_many_packets_correctness(
     ]
     execute(tasks, parallelism)
     actual_result = sum(load_results(tmpdir))
-    expected_result = 4002577512500
+    expected_result = 4002617512500
     assert actual_result == expected_result
 
 
 if __name__ == "__main__":
-    test_single_worker_error("process-spawn")
+    test_many_packets_correctness("/tmp", 2, 4, "process-spawn")

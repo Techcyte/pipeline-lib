@@ -8,7 +8,7 @@ from pipeline_executor import PARALLELISM_STRATEGIES, PipelineTask, execute
 
 N_MANY_MESSAGES = 10000
 N_BIG_MESSAGES = 100
-BIG_MESSAGE_SIZE = 1000000
+BIG_MESSAGE_SIZE = 10000000
 BIG_MESSAGE_BYTES = 4 * BIG_MESSAGE_SIZE + 500
 
 
@@ -28,6 +28,7 @@ def generate_large_messages() -> Iterable[Dict[str, Any]]:
 def process_message(messages: Iterable[Dict[str, Any]]) -> Iterable[Dict[str, Any]]:
     for msg in messages:
         msg["processed"] = True
+        msg["message_value"] += 1
         yield msg
 
 

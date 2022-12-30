@@ -35,6 +35,52 @@ def roundup_to_align(size):
     return size + (-size) % ALIGN_SIZE
 
 
+class CyclicAllocator:
+    def __init__(self, max_num_elements: int, ctx: BaseContext) -> None:
+        self.max_num_elements = max_num_elements
+        self.producer_idxs = ctx.RawArray(ctypes.c_int, self.max_num_elements)
+        self.producer_next = ctx.Value(ctypes.c_int, 0, lock=False)
+        self.producer_last = ctx.Value(ctypes.c_int, 0, lock=False)
+        # initialize to putting everything avaliable
+        for i in range(self.max_num_elements):
+            self.producer_idxs[i] = i
+
+        self.consumer_idxs = ctx.RawArray(ctypes.c_int, self.max_num_elements)
+        self.consumer_next = ctx.Value(ctypes.c_int, 0, lock=False)
+        self.consumer_last = ctx.Value(ctypes.c_int, 0, lock=False)
+
+        self.position_lock = ctx.Lock()
+
+    def pop_write_pos(self):
+        with self.position_lock:
+            write_entry = int(self.producer_next.value)
+            write_pos = int(self.producer_idxs[write_entry])
+            self.producer_next.value = (write_entry + 1) % self.max_num_elements
+        return write_pos
+
+    def push_read_pos(self, written_pos: int):
+        with self.position_lock:
+            write_entry = int(self.consumer_last.value)
+            self.consumer_idxs[write_entry] = written_pos
+            self.consumer_last.value = (write_entry + 1) % self.max_num_elements
+
+    def pop_read_pos(self):
+        with self.position_lock:
+            read_entry = int(self.consumer_next.value)
+            if read_entry == int(self.consumer_last.value):
+                # no entry avaliable for reading, cannot continue
+                raise queue.Empty()
+            read_pos = self.consumer_idxs[read_entry]
+            self.consumer_next.value = (read_entry + 1) % self.max_num_elements
+        return read_pos
+
+    def push_write_pos(self, read_pos):
+        with self.position_lock:
+            read_entry = int(self.producer_last.value)
+            self.producer_idxs[read_entry] = read_pos
+            self.producer_last.value = (read_entry + 1) % self.max_num_elements
+
+
 class BufferedQueue:
     """
     A custom queue implementation based on fixed-size shared memory buffers to transfer data.
@@ -66,6 +112,7 @@ class BufferedQueue:
         self.orig_buf_size = buf_size
         # round buffer size up to align size so that every packets buffer starts as aligned
         self.buf_size = roundup_to_align(buf_size)
+        # TODO: combine _pickle_data and _out_of_band_data into single buffer (probably by placing out of band starting from end?)
         self._pickle_data = ctx.RawArray(
             ctypes.c_byte, buf_size * self.max_num_elements
         )
@@ -73,59 +120,45 @@ class BufferedQueue:
             ctypes.c_byte, buf_size * self.max_num_elements
         )
         self.buf_sizes = ctx.RawArray(ctypes.c_int, self.max_num_elements)
-        self.first_item_pos = ctx.Value(ctypes.c_int, 0, lock=False)
-        self.last_item_pos = ctx.Value(ctypes.c_int, 0, lock=False)
-        # put, get, and __len__ all require synchonized access to the two position variables
-        self.position_lock = ctx.Lock()
-        # writing and reading must happen one at a time, but reading and writing can occur synchronously, except for the position update
-        self.write_lock = ctx.Lock()
-        self.read_lock = ctx.Lock()
+        self.entry_alloc = CyclicAllocator(max_num_elements, ctx)
 
     def put(self, item: Any):
-        with self.write_lock:
-            with self.position_lock:
-                write_pos = int(self.first_item_pos.value)
-                new_pos = (write_pos + 1) % self.max_num_elements
-                self.first_item_pos.value = new_pos
+        write_pos = self.entry_alloc.pop_write_pos()
+        block_start = write_pos * self.buf_size
+        item_bytes = pickle.dumps(
+            item,
+            protocol=pickle.HIGHEST_PROTOCOL,
+            buffer_callback=self.make_buffer_callback(write_pos),
+        )
+        # this needs to be inside lock, so unfortunately all pickling needs to be inside lock as well
+        self.buf_sizes[write_pos] = len(item_bytes)
 
-            block_start = write_pos * self.buf_size
-
-            item_bytes = pickle.dumps(
-                item,
-                protocol=pickle.HIGHEST_PROTOCOL,
-                buffer_callback=self.make_buffer_callback(write_pos),
+        if len(item_bytes) > self.buf_size:
+            raise ValueError(
+                f"Tried to pass item which picked to size {len(item_bytes)}, but PipelineTask.max_message_size is {self.orig_buf_size}"
             )
-            # this needs to be inside lock, so unfortunately all pickling needs to be inside lock as well
-            self.buf_sizes[write_pos] = len(item_bytes)
-
-            if len(item_bytes) > self.buf_size:
-                raise ValueError(
-                    f"Tried to pass item which picked to size {len(item_bytes)}, but PipelineTask.max_message_size is {self.orig_buf_size}"
-                )
-            pickled_view = memoryview(item_bytes).cast("b")
-            mem_view = memoryview(self._pickle_data).cast("b")
-            mem_view[block_start : block_start + len(item_bytes)] = pickled_view
+        pickled_view = memoryview(item_bytes).cast("b")
+        mem_view = memoryview(self._pickle_data).cast("b")
+        mem_view[block_start : block_start + len(item_bytes)] = pickled_view
+        # makes entry avaliable for reading
+        self.entry_alloc.push_read_pos(write_pos)
 
     def get(self):
-        with self.read_lock:
-            with self.position_lock:
-                read_pos = int(self.last_item_pos.value)
-                next_write_pos = int(self.first_item_pos.value)
-                if read_pos == next_write_pos:
-                    raise queue.Empty()
-                new_pos = (read_pos + 1) % self.max_num_elements
-                self.last_item_pos.value = new_pos
+        read_pos = self.entry_alloc.pop_read_pos()
+        # no producers should be writing to this queue entry due to datastream semaphores
+        num_bytes = int(self.buf_sizes[read_pos])
+        read_block = read_pos * self.buf_size
+        mem_view = memoryview(self._pickle_data).cast("b")
+        data_bytes = mem_view[read_block : read_block + num_bytes]
 
-            # no producers should be writing to this queue entry due to datastream semaphores
-            num_bytes = int(self.buf_sizes[read_pos])
-            read_block = read_pos * self.buf_size
-            mem_view = memoryview(self._pickle_data).cast("b")
-            data_bytes = mem_view[read_block : read_block + num_bytes]
+        loaded_data = pickle.loads(
+            data_bytes, buffers=self.iter_stored_buffers(read_pos)
+        )
+        return loaded_data, read_pos
 
-            loaded_data = pickle.loads(
-                data_bytes, buffers=self.iter_stored_buffers(read_pos)
-            )
-            return loaded_data
+    def free(self, read_pos: int):
+        # frees up element for writing
+        self.entry_alloc.push_write_pos(read_pos)
 
     def make_buffer_callback(self, write_pos):
         out_of_band_view = memoryview(self._out_of_band_data).cast("b")
@@ -172,23 +205,14 @@ class BufferedQueue:
             chunk_size = int(out_of_band_size_view[cur_pos // 4])
             if chunk_size == 0:
                 break
-            # a copy is required because the shared memory will be mutating after this returns
-            # TODO: check if this is actually required given the "packets in flight concept"
-            # which should ideally mean that a consumer and a producer are never working on the same
-            # packet index at the same time
-            out_buffer = bytes(
-                out_of_band_view[
-                    ALIGN_SIZE + cur_pos : ALIGN_SIZE + cur_pos + chunk_size
-                ]
-            )
+            # NOTE: this returns a reference to shared memory,
+            # could cause errors if users try to store references
+            # to this memory *between loop iterations*
+            out_buffer = out_of_band_view[
+                ALIGN_SIZE + cur_pos : ALIGN_SIZE + cur_pos + chunk_size
+            ]
             yield out_buffer
             cur_pos += roundup_to_align(ALIGN_SIZE + chunk_size)
-
-    def __len__(self):
-        with self.position_lock:
-            return (
-                self.last_item_pos.value - self.first_item_pos.value
-            ) % self.max_num_elements
 
 
 class TaskOutput:
@@ -216,12 +240,15 @@ class TaskOutput:
                 raise PropogateErr()
 
             try:
-                item = self.queue.get()
+                item, read_pos = self.queue.get()
             except queue.Empty:
                 # only occurs if error occured or no more producers left
                 break
 
             yield item
+
+            # frees shared memory buffer so that it can be used elsewhere
+            self.queue.free(read_pos)
 
             # this release needs to happen after the yield
             # completes to support full synchronization semantics with packets_in_flight=1
@@ -421,7 +448,7 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
 
         if has_error:
             # first entry on the error queue should hopefully be the original error, just raise that one single error
-            task_name, task_err, traceback_str = err_queue.get()
+            (task_name, task_err, traceback_str), _ = err_queue.get()
             # should only be at most one unique error, just raise it
             raise TaskError(
                 f"Task; {task_name} errored\n{traceback_str}\n{task_err}"
