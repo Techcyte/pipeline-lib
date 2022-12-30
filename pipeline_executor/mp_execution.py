@@ -219,6 +219,7 @@ class BufferedQueue:
             cur_pos += roundup_to_align(ALIGN_SIZE + chunk_size)
 
     def set_write_end(self):
+        # nothing to indicate here
         pass
 
     def flush_writes(self, has_error: mp.Event):
@@ -245,10 +246,12 @@ def _put_thread_start(
 
 
 class AsyncItemPassing:
-    """A lighter weight implementation of mp.Queue
-    for one-to-one process communication.
+    """A substitute for mp.Queue
+    for one-to-one process sequential communication.
     Unlike mp.Pipe, put() does not block.
-    Unlike mp.Queue(), put() only returns once the item is gettable"""
+    Unlike mp.Queue, this is designed with 
+    sudden process exiting/erroring in mind.
+    """
 
     def __init__(self, ctx: BaseContext) -> None:
         self._read_end, self._write_end = ctx.Pipe(duplex=False)
