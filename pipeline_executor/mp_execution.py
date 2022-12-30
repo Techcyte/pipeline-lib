@@ -358,7 +358,6 @@ class TaskOutput:
         self.error_info = error_info
 
     def iter_results(self) -> Iterable[Any]:
-        self.queue.set_read_end()
         while True:
             self.queue_len.acquire()  # pylint: disable=consider-using-with
             if self.has_error.is_set():
