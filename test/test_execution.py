@@ -173,10 +173,7 @@ def test_sudden_exit_middle_sleepers(parallelism: ParallelismStrategy):
 @pytest.mark.parametrize("parallelism", all_parallelism_options)
 def test_full_contents_buffering(parallelism: ParallelismStrategy):
     tasks = [
-        PipelineTask(
-            generate_numbers,
-            packets_in_flight=10000,
-        ),
+        PipelineTask(generate_numbers, packets_in_flight=10000, max_message_size=1000),
         PipelineTask(sleeper, packets_in_flight=10000, max_message_size=1000),
         PipelineTask(
             print_numbers,
@@ -416,7 +413,7 @@ def sum_arrays(messages: Iterable[Dict[str, Any]]) -> Iterable[int]:
 
 @pytest.mark.parametrize("parallelism", all_parallelism_options)
 @pytest.mark.parametrize("n_procs,packets_in_flight", [(1, 1), (1, 4), (4, 16)])
-def test_many_packets_correctness(
+def test_many_large_packets_correctness(
     tmpdir, n_procs: int, packets_in_flight: int, parallelism: ParallelismStrategy
 ):
     tasks = [
@@ -431,6 +428,12 @@ def test_many_packets_correctness(
             packets_in_flight=packets_in_flight,
         ),
         PipelineTask(
+            process_message,
+            # process with piped messages
+            num_workers=n_procs,
+            packets_in_flight=packets_in_flight,
+        ),
+        PipelineTask(
             sum_arrays,
             num_workers=n_procs,
             packets_in_flight=packets_in_flight,
@@ -439,9 +442,10 @@ def test_many_packets_correctness(
     ]
     execute(tasks, parallelism)
     actual_result = sum(load_results(tmpdir))
-    expected_result = 4002617512500
+    expected_result = 4002657512500
     assert actual_result == expected_result
 
 
 if __name__ == "__main__":
-    test_many_packets_correctness("/tmp", 2, 4, "process-spawn")
+    # test_many_large_packets_correctness("/tmp", 2, 4, "process-spawn")
+    test_execute("process-spawn")

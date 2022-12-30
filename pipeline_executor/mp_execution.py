@@ -3,10 +3,11 @@ import multiprocessing as mp
 import multiprocessing.connection as mp_connection
 import pickle
 import queue
+import threading as tr
 import traceback
 from dataclasses import dataclass
 from multiprocessing.context import BaseContext
-from typing import Any, Iterable, List, Literal
+from typing import Any, Iterable, List, Literal, Optional
 
 from .pipeline_task import PipelineTask, TaskError
 from .type_checking import MAX_NUM_WORKERS, type_check_tasks
@@ -67,7 +68,9 @@ class CyclicAllocator:
     def pop_read_pos(self):
         with self.position_lock:
             read_entry = int(self.consumer_next.value)
-            if read_entry == int(self.consumer_last.value):
+            last_read_entry = int(self.consumer_last.value)
+            # print(read_entry, last_read_entry)
+            if read_entry == last_read_entry:
                 # no entry avaliable for reading, cannot continue
                 raise queue.Empty()
             read_pos = self.consumer_idxs[read_entry]
@@ -215,6 +218,122 @@ class BufferedQueue:
             yield out_buffer
             cur_pos += roundup_to_align(ALIGN_SIZE + chunk_size)
 
+    def set_write_end(self):
+        pass
+
+    def flush_writes(self, has_error: mp.Event):
+        # writes already flushed...
+        pass
+
+
+def _put_thread_start(
+    _put_thread_sent: tr.Event,
+    _put_thread_recived: tr.Event,
+    _put_thread_joinable: tr.Event,
+    _put_thread_item: List[Any],
+    _write_end: mp_connection.Connection,
+):
+    while True:
+        _put_thread_sent.wait()
+        _put_thread_sent.clear()
+        item = _put_thread_item[0]
+        _put_thread_recived.set()
+
+        # write position is reserved, no need to synchronize pipe
+        _write_end.send(item)
+        _put_thread_joinable.set()
+
+
+class AsyncItemPassing:
+    """A lighter weight implementation of mp.Queue
+    for one-to-one process communication.
+    Unlike mp.Pipe, put() does not block.
+    Unlike mp.Queue(), put() only returns once the item is gettable"""
+
+    def __init__(self, ctx: BaseContext) -> None:
+        self._read_end, self._write_end = ctx.Pipe(duplex=False)
+        self._put_thread_item = [None]
+        # these cannot be pickled for spawn multiprocessing
+        self._put_thread_recived = None
+        self._put_thread_sent = None
+        self._put_thread = None
+        self._put_thread_joinable = None
+
+    def put(self, item):
+        self._put_thread_item[0] = item
+        self._put_thread_joinable.clear()
+        self._put_thread_sent.set()
+        self._put_thread_recived.wait()
+        self._put_thread_recived.clear()
+
+    def get(self):
+        # try polling the recv end a few times to allow putting thread to catch up
+        # in the case of a particularly short race condition
+        for i in range(10000):
+            try:
+                return self._read_end.recv()
+            except EOFError:
+                pass
+        return self._read_end.recv()
+
+    def set_write_end(self):
+        self._read_end.close()
+
+        self._put_thread_recived = tr.Event()
+        self._put_thread_sent = tr.Event()
+        self._put_thread_joinable = tr.Event()
+        self._put_thread_joinable.set()
+        self._put_thread = tr.Thread(
+            target=_put_thread_start,
+            args=(
+                self._put_thread_sent,
+                self._put_thread_recived,
+                self._put_thread_joinable,
+                self._put_thread_item,
+                self._write_end,
+            ),
+        )
+        self._put_thread.setDaemon(True)
+        self._put_thread.start()
+
+
+class PipedQueue:
+    """
+    A custom queue implementation based on piped buffers to transfer data.
+    """
+
+    def __init__(self, max_num_elements: int, ctx: BaseContext) -> None:
+        self.max_num_elements = max_num_elements
+        self.queues = [AsyncItemPassing(ctx) for _ in range(max_num_elements)]
+        self.entry_alloc = CyclicAllocator(max_num_elements, ctx)
+
+    def set_write_end(self):
+        for q in self.queues:
+            q.set_write_end()
+
+    def put(self, item: Any):
+        write_pos = self.entry_alloc.pop_write_pos()
+        # this pipe is reserved, will only be read by a single reader
+        self.queues[write_pos].put(item)
+        # makes entry avaliable for reading
+        self.entry_alloc.push_read_pos(write_pos)
+
+    def get(self):
+        read_pos = self.entry_alloc.pop_read_pos()
+        # only one producer will be writing to this endpoint
+        loaded_data = self.queues[read_pos].get()
+        return loaded_data, read_pos
+
+    def free(self, read_pos: int):
+        # frees up element for writing
+        self.entry_alloc.push_write_pos(read_pos)
+
+    def flush_writes(self, has_error: mp.Event):
+        for q in self.queues:
+            while not q._put_thread_joinable.wait(timeout=0.02):
+                if has_error.is_set():
+                    break
+
 
 class TaskOutput:
     def __init__(
@@ -222,7 +341,7 @@ class TaskOutput:
         num_upstream_tasks: int,
         packets_in_flight: int,
         error_info: BufferedQueue,
-        max_message_size: int,
+        max_message_size: Optional[int],
         ctx: BaseContext,
     ) -> None:
         self.num_tasks_remaining = ctx.Value("i", num_upstream_tasks, lock=True)
@@ -230,11 +349,16 @@ class TaskOutput:
         self.packets_space = ctx.Semaphore(value=packets_in_flight)
         # using a custom queue implementation rather than multiprocessing.queue
         # because mp.Queue has strange synchronization properties with the semaphores, leading to many bugs
-        self.queue = BufferedQueue(max_message_size, packets_in_flight + 1, ctx)
+        self.queue = (
+            BufferedQueue(max_message_size, packets_in_flight + 1, ctx)
+            if max_message_size is not None
+            else PipedQueue(packets_in_flight + 1, ctx)
+        )
         self.has_error = ctx.Event()
         self.error_info = error_info
 
     def iter_results(self) -> Iterable[Any]:
+        self.queue.set_read_end()
         while True:
             self.queue_len.acquire()  # pylint: disable=consider-using-with
             if self.has_error.is_set():
@@ -257,6 +381,7 @@ class TaskOutput:
 
     def put_results(self, iterable: Iterable[Any]):
         iterator = iter(iterable)
+        self.queue.set_write_end()
         try:
             while True:
                 # wait for space to be avaliable on queue before iterating to next item
@@ -271,6 +396,8 @@ class TaskOutput:
                 self.queue.put(item)
                 self.queue_len.release()
         except StopIteration:
+            # flush and clean up up queue resources since it is done putting
+            self.queue.flush_writes(has_error=self.has_error)
             # normal end of iteration
             with self.num_tasks_remaining.get_lock():
                 self.num_tasks_remaining.value -= 1
@@ -312,7 +439,6 @@ def _start_worker(
         generator_input = upstream.iter_results()
         out_iter = task.generator(generator_input, **task.constants_dict)
         downstream.put_results(out_iter)
-
     except Exception as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
         # sets upstream and downstream so that error propogates throughout the system

@@ -20,7 +20,9 @@ class PipelineTask:
     # So one packet means full execution synchronization
     packets_in_flight: int = DEFAULT_PACKETS_IN_FLIGHT
     # only applicable in multiprocessing setting
-    max_message_size: int = DEFAULT_BUF_SIZE
+    # if set to None, then no limit on message size, but
+    # message reads will be much slower
+    max_message_size: Optional[int] = None
 
     @property
     def name(self) -> str:

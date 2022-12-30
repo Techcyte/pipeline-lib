@@ -60,12 +60,34 @@ def run_big_messages(n_procs: int, packets_in_flight: int, parallelism_type: str
     )
 
 
+def run_big_messages_no_buffer(
+    n_procs: int, packets_in_flight: int, parallelism_type: str
+):
+    execute(
+        [
+            PipelineTask(
+                generate_large_messages,
+            ),
+            PipelineTask(
+                process_message,
+                num_workers=n_procs,
+                packets_in_flight=packets_in_flight,
+            ),
+            PipelineTask(
+                consume_messages,
+                num_workers=n_procs,
+                packets_in_flight=packets_in_flight,
+            ),
+        ],
+        parallelism_type,
+    )
+
+
 def run_small_messages(n_procs: int, packets_in_flight: int, parallelism_type: str):
     execute(
         [
             PipelineTask(
                 generate_many_messages,
-                max_message_size=BIG_MESSAGE_BYTES,
             ),
             PipelineTask(
                 process_message,
@@ -100,18 +122,21 @@ def benchmark_execution():
             ParameterCombination(4, 12, "parallel", parallel_type),
         ]
     ]
-    functions = [run_small_messages, run_big_messages]
-    message_sizes = [100, BIG_MESSAGE_BYTES]
-    num_messages = [N_MANY_MESSAGES, N_BIG_MESSAGES]
+    functions = [run_small_messages, run_big_messages, run_big_messages_no_buffer]
+    message_sizes = [100, BIG_MESSAGE_BYTES, BIG_MESSAGE_BYTES]
+    num_messages = [N_MANY_MESSAGES, N_BIG_MESSAGES, N_BIG_MESSAGES]
+    buffer_type = ["pipe", "shared-mem", "pipe"]
     markdown_lines = []
     markdown_lines.append(
-        "num messages|message size|"
+        "num messages|message size|message type|"
         + "|".join(
             f"{comb.name}-{comb.parallel_type}" for comb in parameter_combinations
         )
     )
-    markdown_lines.append("|".join(["---"] * (len(parameter_combinations) + 2)))
-    for msg_size, n_msgs, run_fn in zip(message_sizes, num_messages, functions):
+    markdown_lines.append("|".join(["---"] * (len(parameter_combinations) + 3)))
+    for msg_size, n_msgs, buf_type, run_fn in zip(
+        message_sizes, num_messages, buffer_type, functions
+    ):
         results = []
         for comb in parameter_combinations:
             start_t = time.time()
@@ -120,7 +145,7 @@ def benchmark_execution():
             results.append(end_t - start_t)
         max_val = min(results)
         markdown_lines.append(
-            f"{msg_size}|{n_msgs}|"
+            f"{n_msgs}|{msg_size}|{buf_type}|"
             + "|".join(f"{res}" if res != max_val else f"**{res}**" for res in results)
         )
     return "\n".join(markdown_lines)
