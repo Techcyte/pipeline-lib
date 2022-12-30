@@ -135,8 +135,9 @@ class BufferedQueue:
 
         if len(item_bytes) > self.buf_size:
             raise ValueError(
-                f"Tried to pass item which picked to size {len(item_bytes)}, but PipelineTask.max_message_size is {self.orig_buf_size}"
+                f"Tried to pass item of serialized size {len(item_bytes)}, but PipelineTask.max_message_size is {self.orig_buf_size}"
             )
+
         pickled_view = memoryview(item_bytes).cast("b")
         mem_view = memoryview(self._pickle_data).cast("b")
         mem_view[block_start : block_start + len(item_bytes)] = pickled_view
