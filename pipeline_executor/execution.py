@@ -1,4 +1,4 @@
-from typing import List, Literal, get_args
+from typing import List, Literal, Tuple, get_args
 
 from .mp_execution import execute_mp
 from .pipeline_task import PipelineTask
@@ -8,7 +8,7 @@ from .tr_execution import execute_tr
 ParallelismStrategy = Literal["thread", "process-fork", "process-spawn", "coroutine"]
 
 # list of strings in ParallelismStrategy
-PARALLELISM_STRATEGIES: List[str] = get_args(ParallelismStrategy)
+PARALLELISM_STRATEGIES: Tuple[str, ...] = get_args(ParallelismStrategy)
 
 
 def execute(tasks: List[PipelineTask], parallelism: ParallelismStrategy = "thread"):

@@ -6,8 +6,9 @@ import queue
 import threading as tr
 import traceback
 from dataclasses import dataclass
+from multiprocessing import synchronize
 from multiprocessing.context import BaseContext
-from typing import Any, Iterable, List, Literal, Optional
+from typing import Any, Iterable, List, Literal, Optional, Tuple
 
 from .pipeline_task import PipelineTask, TaskError
 from .type_checking import MAX_NUM_WORKERS, type_check_tasks
@@ -84,7 +85,39 @@ class CyclicAllocator:
             self.producer_last.value = (read_entry + 1) % self.max_num_elements
 
 
-class BufferedQueue:
+class AsyncQueue:
+    def get(self) -> Tuple[Any, int]:
+        """
+        returns a tuple of (queued_item, packet_id)
+
+        Need to call free(packet_id) after finished using the object.
+
+        If no objects to get, raises queue.Empty error
+        """
+        raise NotImplementedError()
+
+    def put(self, _item: Any):
+        """
+        Puts item on queue. Undefined behavior if there are more items put
+        on the queue than the space avaliable.
+
+        TODO: raise an error
+        """
+        raise NotImplementedError()
+
+    def free(self, _packet_id: int):
+        """
+        Free up fetched packet for writing
+        """
+        raise NotImplementedError()
+
+    def flush(self, has_error: synchronize.Event):
+        """
+        Flush all pending writes (will block unless has_error is set)
+        """
+
+
+class BufferedQueue(AsyncQueue):
     """
     A custom queue implementation based on fixed-size shared memory buffers to transfer data.
 
@@ -218,11 +251,7 @@ class BufferedQueue:
             yield out_buffer
             cur_pos += roundup_to_align(ALIGN_SIZE + chunk_size)
 
-    def set_write_end(self):
-        # nothing to indicate here
-        pass
-
-    def flush_writes(self, has_error: mp.Event):
+    def flush(self, has_error: synchronize.Event):
         # writes already flushed...
         pass
 
@@ -249,7 +278,7 @@ class AsyncItemPassing:
     """A substitute for mp.Queue
     for one-to-one process sequential communication.
     Unlike mp.Pipe, put() does not block.
-    Unlike mp.Queue, this is designed with 
+    Unlike mp.Queue, this is designed with
     sudden process exiting/erroring in mind.
     """
 
@@ -260,9 +289,12 @@ class AsyncItemPassing:
         self._put_thread_recived = None
         self._put_thread_sent = None
         self._put_thread = None
-        self._put_thread_joinable = None
+        self._put_thread_joinable: Optional[synchronize.Event] = None
 
     def put(self, item):
+        if self._put_thread_recived is None:
+            self._set_write_end()
+
         self._put_thread_item[0] = item
         self._put_thread_joinable.clear()
         self._put_thread_sent.set()
@@ -279,9 +311,7 @@ class AsyncItemPassing:
                 pass
         return self._read_end.recv()
 
-    def set_write_end(self):
-        self._read_end.close()
-
+    def _set_write_end(self):
         self._put_thread_recived = tr.Event()
         self._put_thread_sent = tr.Event()
         self._put_thread_joinable = tr.Event()
@@ -295,12 +325,18 @@ class AsyncItemPassing:
                 self._put_thread_item,
                 self._write_end,
             ),
+            daemon=True
         )
-        self._put_thread.setDaemon(True)
         self._put_thread.start()
 
+    def flush(self, has_error: synchronize.Event):
+        if self._put_thread_joinable is not None:
+            while not self._put_thread_joinable.wait(timeout=0.02):
+                if has_error.is_set():
+                    break
 
-class PipedQueue:
+
+class PipedQueue(AsyncQueue):
     """
     A custom queue implementation based on piped buffers to transfer data.
     """
@@ -309,10 +345,6 @@ class PipedQueue:
         self.max_num_elements = max_num_elements
         self.queues = [AsyncItemPassing(ctx) for _ in range(max_num_elements)]
         self.entry_alloc = CyclicAllocator(max_num_elements, ctx)
-
-    def set_write_end(self):
-        for q in self.queues:
-            q.set_write_end()
 
     def put(self, item: Any):
         write_pos = self.entry_alloc.pop_write_pos()
@@ -331,11 +363,9 @@ class PipedQueue:
         # frees up element for writing
         self.entry_alloc.push_write_pos(read_pos)
 
-    def flush_writes(self, has_error: mp.Event):
+    def flush(self, has_error: synchronize.Event):
         for q in self.queues:
-            while not q._put_thread_joinable.wait(timeout=0.02):
-                if has_error.is_set():
-                    break
+            q.flush(has_error)
 
 
 class TaskOutput:
@@ -383,7 +413,6 @@ class TaskOutput:
 
     def put_results(self, iterable: Iterable[Any]):
         iterator = iter(iterable)
-        self.queue.set_write_end()
         try:
             while True:
                 # wait for space to be avaliable on queue before iterating to next item
@@ -399,7 +428,7 @@ class TaskOutput:
                 self.queue_len.release()
         except StopIteration:
             # flush and clean up up queue resources since it is done putting
-            self.queue.flush_writes(has_error=self.has_error)
+            self.queue.flush(has_error=self.has_error)
             # normal end of iteration
             with self.num_tasks_remaining.get_lock():
                 self.num_tasks_remaining.value -= 1
