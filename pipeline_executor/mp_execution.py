@@ -3,6 +3,7 @@ import multiprocessing as mp
 import multiprocessing.connection as mp_connection
 import pickle
 import queue
+import select
 import threading as tr
 import traceback
 from dataclasses import dataclass
@@ -242,9 +243,8 @@ class BufferedQueue(AsyncQueue):
             chunk_size = int(out_of_band_size_view[cur_pos // 4])
             if chunk_size == 0:
                 break
-            # NOTE: this returns a reference to shared memory,
-            # could cause errors if users try to store references
-            # to this memory *between loop iterations*
+            # NOTE: this copies the memory out of shared memory, which is quite expensive
+            # but can cause problems if references to this shared memory is passed to another pipeline
             out_buffer = out_of_band_view[
                 ALIGN_SIZE + cur_pos : ALIGN_SIZE + cur_pos + chunk_size
             ]
@@ -270,7 +270,7 @@ def _put_thread_start(
         _put_thread_recived.set()
 
         # write position is reserved, no need to synchronize pipe
-        _write_end.send(item)
+        _write_end.send_bytes(item)
         _put_thread_joinable.set()
 
 
@@ -295,20 +295,23 @@ class AsyncItemPassing:
         if self._put_thread_recived is None:
             self._set_write_end()
 
-        self._put_thread_item[0] = item
+        # copies all contents to byte array so that
+        # furthur mutations of the data after this
+        # returns does not change the result
+        self._put_thread_item[0] = pickle.dumps(item)
         self._put_thread_joinable.clear()
         self._put_thread_sent.set()
         self._put_thread_recived.wait()
         self._put_thread_recived.clear()
 
     def get(self):
-        # try polling the recv end a few times to allow putting thread to catch up
-        # in the case of a particularly short race condition
-        for i in range(10000):
-            try:
-                return self._read_end.recv()
-            except EOFError:
-                pass
+        try:
+            return self._read_end.recv()
+        except EOFError:
+            # file wasn't readable at the moment, but hopefully it will be soon
+            pass
+        # wait for file to become readable
+        select.select([self._read_end.fileno()], [], [])
         return self._read_end.recv()
 
     def _set_write_end(self):
@@ -325,7 +328,7 @@ class AsyncItemPassing:
                 self._put_thread_item,
                 self._write_end,
             ),
-            daemon=True
+            daemon=True,
         )
         self._put_thread.start()
 

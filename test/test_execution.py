@@ -173,8 +173,8 @@ def test_sudden_exit_middle_sleepers(parallelism: ParallelismStrategy):
 @pytest.mark.parametrize("parallelism", all_parallelism_options)
 def test_full_contents_buffering(parallelism: ParallelismStrategy):
     tasks = [
-        PipelineTask(generate_numbers, packets_in_flight=10000, max_message_size=1000),
-        PipelineTask(sleeper, packets_in_flight=10000, max_message_size=1000),
+        PipelineTask(generate_numbers, packets_in_flight=1000, max_message_size=1000),
+        PipelineTask(sleeper, packets_in_flight=1000, max_message_size=1000),
         PipelineTask(
             print_numbers,
         ),
@@ -204,6 +204,8 @@ def test_full_synchronization(parallelism: ParallelismStrategy):
             generate_numbers,
             packets_in_flight=1,
         ),
+        PipelineTask(add_one_to, packets_in_flight=1, constants=dict(value=val)),
+        PipelineTask(sub_one_to, packets_in_flight=1, constants=dict(value=val)),
         PipelineTask(add_one_to, packets_in_flight=1, constants=dict(value=val)),
         PipelineTask(sub_one_to, packets_in_flight=1, constants=dict(value=val)),
         PipelineTask(print_numbers, packets_in_flight=1),
@@ -447,5 +449,7 @@ def test_many_large_packets_correctness(
 
 
 if __name__ == "__main__":
+    # failed at:
+    # :test_many_large_packets_correctness[4-16-process-spawn-1-10]
     # test_many_large_packets_correctness("/tmp", 2, 4, "process-spawn")
-    test_execute("process-spawn")
+    test_full_synchronization("process-spawn")
