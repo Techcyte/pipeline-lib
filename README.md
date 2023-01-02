@@ -101,10 +101,11 @@ A Pipeline has three parts:
 2. *Processor* generators, consuming a linear stream of inputs and producing stream of outputs. These streams do not have to be one-to-one. If the inputs and outputs can be handled independently (user responsible for verifying this), then these processors can be multiplexed across parallel threads.
 3. A *sink*: a function that consumes an iterator, returns None
 
-The runtime execution model has two concepts:
+The runtime execution model has a few key concepts:
 
 1. Max Packets in Flight: Max number of total packets being constructed or being consumed. A "packet" is assumped to be under construction whenever a producer or a consumer worker is running. So `packets_in_flight=1` means that the work on the data is completed fully synchronously. If the number of packets is greater than the number of workers, they are stored FIFO queue buffer.
 1. Workers: A worker is an independent thread of execution working in an instance of a generator. More than one worker can potentially lead to greater throughput, depending on the implementation.
+1. Buffer size (*multiprocessing only*): If `max_message_size` is set, then uses a shared memory scheme to pass data between producer and consumer very efficiently (see benchmark results below). **Warning**: If the actual pickled size of the data exceeds the specified size, then an error is raised, and there is no performance cost to the buffer being too large, so having large buffers is encouraged. If the `max_message_size` is not set, then it uses a pipe to communicate arbitrary amounts of data.
 
 ### Runtime error handling behavior
 
@@ -131,7 +132,7 @@ There are also some sanity checks on the runtime values
 
 ## Benchmarks
 
-This gives a rough estimation of how much overhead each parallelism technique has for different workloads. 
+This gives a rough estimation of how much overhead each parallelism technique has for different workloads.
 It is produced by running `benchmark/run_benchmark.py`. Results below are on a native linux system on a desktop.
 
 num messages|message size|message type|sequential-thread|buffered-thread|parallel-thread|sequential-process-fork|buffered-process-fork|parallel-process-fork|sequential-process-spawn|buffered-process-spawn|parallel-process-spawn|sequential-coroutine|buffered-coroutine|parallel-coroutine
