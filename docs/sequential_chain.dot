@@ -1,8 +1,6 @@
 digraph search {
 overlap = false;
 #rankdir="LR";
-overlap=scalexy; //false, compress, ...
-sep="+1"; // 0.1, +1
 
 # compute nodes
     node [
@@ -14,14 +12,18 @@ sep="+1"; // 0.1, +1
         fixedsize=true
         pad="0.212,1"
     ]
-    t1 [label="Task 1", fillcolor="gray" pos="0,0!"]
-    m1 [label="Queue 1", fillcolor="gray" pos="0,1.5!"]
-    t2 [label="Task 2", fillcolor="gray" pos="0,3!"]
-    m2 [label="Queue 2", fillcolor="gray" pos="0,4.5!"]
-    t3 [label="Task 3", fillcolor="gray" pos="0,6!"]
+    t1 [label="Task 1", fillcolor="white"]
+    m1 [label="Queue 1", fillcolor="gray"]
+    t2 [label="Task 2", fillcolor="white"]
+    m2 [label="Queue 2", fillcolor="gray"]
+    t3 [label="Task 3", fillcolor="gray"]
 
-    t1 -> m1 [color="red"]
+    t1 -> m1 [color="white"]
+    m1 -> t2 [color="white"]
+    t2 -> m2 [color="white"]
+    m2 -> t3 [color="white"]
+    t3 -> m2 [color="black"]
     t2 -> m1 [color="gray"]
-    t2 -> m2 [color="black"]
-    t3 -> m2 [color="red"]
+    t1 -> m1 [color="red"]
+    t2 -> m2 [color="red"]
 }
