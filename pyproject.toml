@@ -16,6 +16,7 @@ dependencies = []
 dev = [
     "numpy",
     "pytest",
+    "pytest-repeat",
     "black",
     "pylint",
     "isort",
