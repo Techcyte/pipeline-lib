@@ -101,10 +101,11 @@ A Pipeline has three parts:
 2. *Processor* generators, consuming a linear stream of inputs and producing stream of outputs. These streams do not have to be one-to-one. If the inputs and outputs can be handled independently (user responsible for verifying this), then these processors can be multiplexed across parallel threads.
 3. A *sink*: a function that consumes an iterator, returns None
 
-The runtime execution model has two concepts:
+The runtime execution model has a few key concepts:
 
 1. Max Packets in Flight: Max number of total packets being constructed or being consumed. A "packet" is assumped to be under construction whenever a producer or a consumer worker is running. So `packets_in_flight=1` means that the work on the data is completed fully synchronously. If the number of packets is greater than the number of workers, they are stored FIFO queue buffer.
 1. Workers: A worker is an independent thread of execution working in an instance of a generator. More than one worker can potentially lead to greater throughput, depending on the implementation.
+1. Buffer size (*multiprocessing only*): If `max_message_size` is set, then uses a shared memory scheme to pass data between producer and consumer very efficiently (see benchmark results below). **Warning**: If the actual pickled size of the data exceeds the specified size, then an error is raised, and there is no performance cost to the buffer being too large, so having large buffers is encouraged. If the `max_message_size` is not set, then it uses a pipe to communicate arbitrary amounts of data.
 
 ### Runtime error handling behavior
 
@@ -127,3 +128,20 @@ There are also some sanity checks on the runtime values
 1. `num_workers > 0`
 1. `num_workers <= MAX_NUM_WORKERS` (currently fixed at 128)
 1. `num_workers <= packets_in_flight` (can deadlock if this isn't true)
+
+
+## Benchmarks
+
+This gives a rough estimation of how much overhead each parallelism technique has for different workloads.
+It is produced by running `benchmark/run_benchmark.py`. Results below are on a native linux system on a desktop.
+
+num messages|message size|message type|sequential-thread|buffered-thread|parallel-thread|sequential-process-fork|buffered-process-fork|parallel-process-fork|sequential-process-spawn|buffered-process-spawn|parallel-process-spawn|sequential-coroutine|buffered-coroutine|parallel-coroutine
+---|---|---|---|---|---|---|---|---|---|---|---|---|---|---
+50000|100|pipe|0.7555396556854248|0.9266531467437744|0.8212599754333496|3.817730188369751|3.2451725006103516|4.528891086578369|3.510835647583008|2.359372854232788|3.8291115760803223|0.011173248291015625|**0.011002779006958008**|0.011194229125976562
+100|40000500|shared-mem|0.7347257137298584|0.7168838977813721|0.7096693515777588|1.6618406772613525|1.7234585285186768|2.360643148422241|1.7754766941070557|1.8370189666748047|2.3839151859283447|0.6940040588378906|0.6877090930938721|**0.6874253749847412**
+100|40000500|pipe|0.7481966018676758|0.7054405212402344|0.7186253070831299|15.17840313911438|12.256989002227783|12.029167175292969|15.116360664367676|12.283705234527588|12.13242483139038|0.6952164173126221|**0.686819314956665**|0.6906819343566895
+
+Two insights are:
+
+1. Multiprocessing has more overhead than threads, which have more overhead than sequential coroutines. But of course, the amount of possible parallelism is maximized for multiprocessing, limited for threads, and missing for coroutines.
+2. Shared memory communication (with fixed buffer sizes) is much faster than piped (infinite buffer size) communication, especially for larger numpy arrays.
