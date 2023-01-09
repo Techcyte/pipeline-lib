@@ -2,4 +2,4 @@
 set -e .
 
 export PYTHONDONTWRITEBYTECODE="set"
-pytest --count=3 test -n 12
+pytest --count=3 test
