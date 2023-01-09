@@ -7,8 +7,10 @@ import select
 import threading as tr
 import traceback
 from dataclasses import dataclass
+from functools import reduce
 from multiprocessing import synchronize
 from multiprocessing.context import BaseContext
+from operator import mul
 from typing import Any, Iterable, List, Literal, Optional, Tuple
 
 from .pipeline_task import PipelineTask, TaskError
@@ -118,6 +120,9 @@ class AsyncQueue:
         """
 
 
+END_OF_BUFFER_ID = -2
+
+
 class BufferedQueue(AsyncQueue):
     """
     A custom queue implementation based on fixed-size shared memory buffers to transfer data.
@@ -204,13 +209,19 @@ class BufferedQueue(AsyncQueue):
 
         start_pos = write_pos * self.buf_size
         # zero out starting marker
-        out_of_band_size_view[start_pos // 4] = 0
+        out_of_band_size_view[start_pos // 4] = END_OF_BUFFER_ID
 
         cur_block_pos = Value(start_pos)
 
         def format_buffer(buf_obj):
-            src_obj = memoryview(buf_obj).cast("b")
-            # print(len(src_len))
+            mem_view = memoryview(buf_obj)
+            if any(dimsize == 0 for dimsize in mem_view.shape):
+                # casting not allowed for zero size memory-views, create a new one instead
+                src_obj = memoryview(b"").cast("b")
+            else:
+                src_obj = mem_view.cast("b")
+                obj_size = reduce(mul, src_obj.shape, 1)
+                src_obj = src_obj.cast("b", (obj_size,))
             src_len = len(src_obj)
             cur_pos = cur_block_pos.value
             next_pos = cur_pos + roundup_to_align(ALIGN_SIZE + src_len)
@@ -220,7 +231,7 @@ class BufferedQueue(AsyncQueue):
                 )
             elif next_pos - start_pos < self.buf_size:
                 # mark current end of buffer by zeroing out size information
-                out_of_band_size_view[next_pos // 4] = 0
+                out_of_band_size_view[next_pos // 4] = END_OF_BUFFER_ID
 
             # set integer size of next chunk
             out_of_band_size_view[cur_pos // 4] = src_len
@@ -241,7 +252,7 @@ class BufferedQueue(AsyncQueue):
         end_pos = (read_pos + 1) * self.buf_size
         while cur_pos < end_pos:
             chunk_size = int(out_of_band_size_view[cur_pos // 4])
-            if chunk_size == 0:
+            if chunk_size == END_OF_BUFFER_ID:
                 break
             # NOTE: this copies the memory out of shared memory, which is quite expensive
             # but can cause problems if references to this shared memory is passed to another pipeline

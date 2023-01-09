@@ -387,7 +387,7 @@ BIG_MESSAGE_BYTES = 4 * BIG_MESSAGE_SIZE + 5000
 
 def generate_large_messages() -> Iterable[Dict[str, Any]]:
     for i in range(N_BIG_MESSAGES):
-        val1 = np.arange(BIG_MESSAGE_SIZE, dtype="int32") + i
+        val1 = np.arange(BIG_MESSAGE_SIZE, dtype="int32").reshape(100, -1) + i
         yield {
             "message_type": "big",
             "message_1_contents": val1,
@@ -448,8 +448,33 @@ def test_many_large_packets_correctness(
     assert actual_result == expected_result
 
 
+def generate_zero_siz_np_arrays() -> Iterable[np.ndarray]:
+    for _ in range(10):
+        val1 = np.zeros((7, 0, 4), dtype="int32")
+        yield val1
+
+
+def consume_nd(inpt: Iterable[np.ndarray]) -> None:
+    for _ in inpt:
+        pass
+
+
+@pytest.mark.parametrize("parallelism", all_parallelism_options)
+def test_zero_size_np_arrays(parallelism: bool):
+    """zero size buffer passing has some edge cases, so testing that it works
+    with a the buffer passing"""
+    tasks = [
+        PipelineTask(
+            generate_zero_siz_np_arrays,
+            max_message_size=100000,
+        ),
+        PipelineTask(consume_nd),
+    ]
+    execute(tasks, parallelism)
+
+
 if __name__ == "__main__":
     # failed at:
     # :test_many_large_packets_correctness[4-16-process-spawn-1-10]
-    # test_many_large_packets_correctness("/tmp", 2, 4, "process-spawn")
-    test_full_synchronization("process-spawn")
+    test_many_large_packets_correctness("/tmp", 2, 4, "process-spawn")
+    # test_zero_size_np_arrays("process-spawn")
