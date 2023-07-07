@@ -351,7 +351,7 @@ def test_main_process_sigterm(parallelism: ParallelismStrategy):
             not proc.is_alive()
         ), "main process didn't kill children during its shutdown process"
         assert not psutil.pid_exists(
-            proc.pid
+            id
         ), "main process didn't join children during its shutdown process"
 
 
