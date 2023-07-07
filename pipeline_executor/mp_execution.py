@@ -256,10 +256,10 @@ class BufferedQueue(AsyncQueue):
             if chunk_size == END_OF_BUFFER_ID:
                 break
             # NOTE: this copies the memory out of shared memory, which is quite expensive
-            # but can cause problems if references to this shared memory is passed to another pipeline
-            out_buffer = out_of_band_view[
+            # but can cause serious problems if references to this shared memory is passed to another pipeline
+            out_buffer = bytearray(out_of_band_view[
                 ALIGN_SIZE + cur_pos : ALIGN_SIZE + cur_pos + chunk_size
-            ]
+            ])
             yield out_buffer
             cur_pos += roundup_to_align(ALIGN_SIZE + chunk_size)
 
