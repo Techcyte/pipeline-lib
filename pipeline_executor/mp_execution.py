@@ -585,7 +585,7 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
         # handle sigterms by raising an error so we can handle it cleanly
         old_sigterm_handling = signal.getsignal(signal.SIGTERM)
         signal.signal(signal.SIGTERM, sigterm_handler)
-        
+
         sentinel_map = {proc.sentinel: proc for proc in processes}
         sentinel_set = {proc.sentinel for proc in processes}
         while sentinel_set and not has_error:
@@ -637,4 +637,3 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
             raise TaskError(
                 f"Task; {task_name} errored\n{traceback_str}\n{task_err}"
             ) from task_err
-        

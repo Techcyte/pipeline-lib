@@ -8,8 +8,8 @@ from contextlib import contextmanager
 from typing import Any, Dict
 
 import numpy as np
-import pytest
 import psutil
+import pytest
 
 import pipeline_executor
 from pipeline_executor import PipelineTask, execute
@@ -301,27 +301,30 @@ def test_single_worker_unexpected_exit(parallelism: ParallelismStrategy):
         execute(tasks, parallelism)
 
 
-def consume_infinite_ints(vals: Iterable[int])->None:
+def consume_infinite_ints(vals: Iterable[int]) -> None:
     for _ in vals:
         pass
 
 
 def start_pipeline(parallelism: ParallelismStrategy):
-    execute([
-        PipelineTask(
-            generate_infinite,
-        ),
-        PipelineTask(consume_infinite_ints, num_workers=2, packets_in_flight=2),
-    ],parallelism=parallelism)
+    execute(
+        [
+            PipelineTask(
+                generate_infinite,
+            ),
+            PipelineTask(consume_infinite_ints, num_workers=2, packets_in_flight=2),
+        ],
+        parallelism=parallelism,
+    )
 
 
 @pytest.mark.parametrize("parallelism", all_parallelism_options)
 def test_main_process_sigterm(parallelism: ParallelismStrategy):
     """
-    If main process receives a sigterm signal, 
+    If main process receives a sigterm signal,
     all the other processes should exit cleanly and quickly
     """
-    ctx = mp.get_context('spawn')
+    ctx = mp.get_context("spawn")
     proc = ctx.Process(target=start_pipeline, args=(parallelism,))
     proc.start()
     # wait for worker processes to start up
@@ -330,7 +333,7 @@ def test_main_process_sigterm(parallelism: ParallelismStrategy):
     # collect all living child processes
     child_procs = psutil.Process(proc.pid).children(recursive=True)
     print(child_procs)
-    # there are 3 child processes we expect 
+    # there are 3 child processes we expect
     # 1 generate_infinite process, 2 consume_infinite_ints processes
     assert len(child_procs) == 3
     all_proc_ids = [proc.pid] + [proc.pid for proc in child_procs]
@@ -340,12 +343,18 @@ def test_main_process_sigterm(parallelism: ParallelismStrategy):
 
     # waits for all the processes to shut down
     proc.join(2.0)
-    assert proc.exitcode is not None, "join timed out, main process did not exist promptly after signterm"
+    assert (
+        proc.exitcode is not None
+    ), "join timed out, main process did not exist promptly after signterm"
     assert proc.exitcode != 0, "main process exited peacefully after sigterm"
-    
+
     for id in child_procs:
-        assert not proc.is_alive(), "main process didn't kill children during its shutdown process"
-        assert not psutil.pid_exists(proc.pid), "main process didn't join children during its shutdown process"
+        assert (
+            not proc.is_alive()
+        ), "main process didn't kill children during its shutdown process"
+        assert not psutil.pid_exists(
+            proc.pid
+        ), "main process didn't join children during its shutdown process"
 
 
 def generate_many() -> Iterable[int]:
