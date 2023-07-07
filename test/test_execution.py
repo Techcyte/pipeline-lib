@@ -346,12 +346,12 @@ def test_main_process_sigterm(parallelism: ParallelismStrategy):
     ), "join timed out, main process did not exist promptly after signterm"
     assert proc.exitcode != 0, "main process exited peacefully after sigterm"
 
-    for id in child_procs:
+    for proc in child_procs:
         assert (
             not proc.is_alive()
         ), "main process didn't kill children during its shutdown process"
         assert not psutil.pid_exists(
-            id
+            proc.pid
         ), "main process didn't join children during its shutdown process"
 
 
