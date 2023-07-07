@@ -4,6 +4,7 @@ import multiprocessing.connection as mp_connection
 import pickle
 import queue
 import select
+import signal
 import threading as tr
 import traceback
 from dataclasses import dataclass
@@ -509,6 +510,10 @@ def _start_sink(
         exit(PYTHON_ERR_EXIT_CODE)
 
 
+def sigterm_handler(signal, frame):
+    raise RuntimeError(f"Encountered signal: {signal}")
+
+
 def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
     # pylint: disable=too-many-branches,too-many-locals
     """
@@ -577,6 +582,10 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
 
     has_error = False
     try:
+        # handle sigterms by raising an error so we can handle it cleanly
+        old_sigterm_handling = signal.getsignal(signal.SIGTERM)
+        signal.signal(signal.SIGTERM, sigterm_handler)
+        
         sentinel_map = {proc.sentinel: proc for proc in processes}
         sentinel_set = {proc.sentinel for proc in processes}
         while sentinel_set and not has_error:
@@ -603,6 +612,9 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
             stream.set_error("_main_thread", err, tb_str)
 
     finally:
+        # reset sigterm handling to default behavior
+        signal.signal(signal.SIGTERM, old_sigterm_handling)
+
         # joins processes as cleanup if they successfully exited
         # give them a decent amount of time to process their current task and exit cleanly
         for proc in processes:
@@ -625,3 +637,4 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
             raise TaskError(
                 f"Task; {task_name} errored\n{traceback_str}\n{task_err}"
             ) from task_err
+        

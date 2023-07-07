@@ -24,6 +24,7 @@ dev = [
     "colorama",
     "build",
     "twine",
+    "psutil",
 ]
 
 [tool.setuptools.package-data]
