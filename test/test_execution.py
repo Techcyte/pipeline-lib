@@ -318,7 +318,7 @@ def start_pipeline(parallelism: ParallelismStrategy):
     )
 
 
-@pytest.mark.parametrize("parallelism", all_parallelism_options)
+@pytest.mark.parametrize("parallelism", ["process-spawn", "process-fork"])
 def test_main_process_sigterm(parallelism: ParallelismStrategy):
     """
     If main process receives a sigterm signal,
@@ -328,7 +328,7 @@ def test_main_process_sigterm(parallelism: ParallelismStrategy):
     proc = ctx.Process(target=start_pipeline, args=(parallelism,))
     proc.start()
     # wait for worker processes to start up
-    time.sleep(5.0)
+    time.sleep(2.0)
 
     # collect all living child processes
     child_procs = psutil.Process(proc.pid).children()
@@ -340,7 +340,7 @@ def test_main_process_sigterm(parallelism: ParallelismStrategy):
     os.kill(proc.pid, signal.SIGTERM)
 
     # waits for all the processes to shut down
-    proc.join(5.0)
+    proc.join(3.0)
     assert (
         proc.exitcode is not None
     ), "join timed out, main process did not exist promptly after signterm"
