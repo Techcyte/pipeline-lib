@@ -347,12 +347,9 @@ def test_main_process_sigterm(parallelism: ParallelismStrategy):
     assert proc.exitcode != 0, "main process exited peacefully after sigterm"
 
     for proc in child_procs:
-        assert (
-            not proc.is_alive()
-        ), "main process didn't kill children during its shutdown process"
         assert not psutil.pid_exists(
             proc.pid
-        ), "main process didn't join children during its shutdown process"
+        ), "main process didn't exit and join children during its shutdown process"
 
 
 def generate_many() -> Iterable[int]:
