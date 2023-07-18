@@ -2,6 +2,7 @@ import contextlib
 import ctypes
 import multiprocessing as mp
 import multiprocessing.connection as mp_connection
+import os
 import pickle
 import queue
 import select
@@ -508,7 +509,7 @@ def sighandler(signum: int, processes: List[mp.Process]):
     def sigterm_handler(signum, frame):
         # propogate the signal to children processes
         for proc in processes:
-            signal.pidfd_send_signal(proc.ident, signum)
+            os.kill(proc.ident, signum)
         # throw an exception to trigger the exceptional cleanup policy
         raise SignalReceived(signum)
 
