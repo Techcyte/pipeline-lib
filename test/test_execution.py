@@ -344,7 +344,9 @@ def test_main_process_sigterm(parallelism: ParallelismStrategy):
     assert (
         proc.exitcode is not None
     ), "join timed out, main process did not exist promptly after signterm"
-    assert proc.exitcode == -15, "main process should return a -15 error code after being hit with a sigterm"
+    assert (
+        proc.exitcode == -15
+    ), "main process should return a -15 error code after being hit with a sigterm"
 
     for proc in child_procs:
         assert not psutil.pid_exists(
