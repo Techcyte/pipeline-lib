@@ -509,6 +509,7 @@ def sighandler(signum: int, processes: List[mp.Process]):
     def sigterm_handler(signum, frame):
         # propogate the signal to children processes
         for proc in processes:
+            # os.kill just sends a signal like the command line tool
             os.kill(proc.ident, signum)
         # throw an exception to trigger the exceptional cleanup policy
         raise SignalReceived(signum)
