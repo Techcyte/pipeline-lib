@@ -263,9 +263,11 @@ class BufferedQueue(AsyncQueue):
                 break
             # NOTE: this copies the memory out of shared memory, which is quite expensive
             # but can cause serious problems if references to this shared memory is passed to another pipeline
-            out_buffer = bytearray(out_of_band_view[
-                ALIGN_SIZE + cur_pos : ALIGN_SIZE + cur_pos + chunk_size
-            ])
+            out_buffer = bytearray(
+                out_of_band_view[
+                    ALIGN_SIZE + cur_pos : ALIGN_SIZE + cur_pos + chunk_size
+                ]
+            )
             yield out_buffer
             cur_pos += roundup_to_align(ALIGN_SIZE + chunk_size)
 
@@ -502,7 +504,7 @@ def _start_worker(
 
 
 @contextlib.contextmanager
-def sighandler(signum: int, processes: List[mp.Process]):  
+def sighandler(signum: int, processes: List[mp.Process]):
     def sigterm_handler(signum, frame):
         # propogate the signal to children processes
         for proc in processes:
@@ -511,17 +513,17 @@ def sighandler(signum: int, processes: List[mp.Process]):
         raise SignalReceived(signum)
 
     old_handling = signal.getsignal(signum)
-    signal.signal(signum, sigterm_handler) 
+    signal.signal(signum, sigterm_handler)
     try:
         yield
     except SignalReceived as sigerr:
         if sigerr.signum == signum:
             # if the signal was raised by our signal handler, then retry the old signal handling method
             # so the end user of the library can handle signals in the way they wish to
-            signal.signal(signum, old_handling) 
+            signal.signal(signum, old_handling)
             signal.raise_signal(signum)
     finally:
-        signal.signal(signum, old_handling) 
+        signal.signal(signum, old_handling)
 
 
 def _start_sink(
@@ -605,6 +607,8 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
     for process in processes:
         process.start()
 
+    # signal setup must be *after* all new processes are started, so that main processes
+    # signal handling won't be copied over to children
     with sighandler(signal.SIGINT, processes), sighandler(signal.SIGTERM, processes):
         has_error = False
         try:
