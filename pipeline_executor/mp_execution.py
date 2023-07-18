@@ -1,3 +1,4 @@
+import contextlib
 import ctypes
 import multiprocessing as mp
 import multiprocessing.connection as mp_connection
@@ -30,6 +31,11 @@ class PropogateErr(RuntimeError):
     # should never be raised in main scope, meant to act as a proxy
     # for propogating errors up and down the pipeline
     pass
+
+
+class SignalReceived(Exception):
+    def __init__(self, signum: int) -> None:
+        self.signum = signum
 
 
 @dataclass
@@ -495,6 +501,29 @@ def _start_worker(
         exit(PYTHON_ERR_EXIT_CODE)
 
 
+@contextlib.contextmanager
+def sighandler(signum: int, processes: List[mp.Process]):  
+    def sigterm_handler(signum, frame):
+        # propogate the signal to children processes
+        for proc in processes:
+            signal.pidfd_send_signal(proc.ident, signum)
+        # throw an exception to trigger the exceptional cleanup policy
+        raise SignalReceived(signum)
+
+    old_handling = signal.getsignal(signum)
+    signal.signal(signum, sigterm_handler) 
+    try:
+        yield
+    except SignalReceived as sigerr:
+        if sigerr.signum == signum:
+            # if the signal was raised by our signal handler, then retry the old signal handling method
+            # so the end user of the library can handle signals in the way they wish to
+            signal.signal(signum, old_handling) 
+            signal.raise_signal(signum)
+    finally:
+        signal.signal(signum, old_handling) 
+
+
 def _start_sink(
     task: PipelineTask,
     upstream: TaskOutput,
@@ -508,10 +537,6 @@ def _start_sink(
         # exiting directly instead of re-raising error, as that would clutter stderr
         # with duplicate tracebacks
         exit(PYTHON_ERR_EXIT_CODE)
-
-
-def sigterm_handler(signal, frame):
-    raise RuntimeError(f"Encountered signal: {signal}")
 
 
 def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
@@ -580,60 +605,57 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
     for process in processes:
         process.start()
 
-    has_error = False
-    try:
-        # handle sigterms by raising an error so we can handle it cleanly
-        old_sigterm_handling = signal.getsignal(signal.SIGTERM)
-        signal.signal(signal.SIGTERM, sigterm_handler)
+    with sighandler(signal.SIGINT, processes), sighandler(signal.SIGTERM, processes):
+        has_error = False
+        try:
+            sentinel_map = {proc.sentinel: proc for proc in processes}
+            sentinel_set = {proc.sentinel for proc in processes}
+            while sentinel_set and not has_error:
+                done_sentinels = mp_connection.wait(list(sentinel_set))
+                sentinel_set -= set(done_sentinels)
+                for done_id in done_sentinels:
+                    # for some reason needs a join, or the exitcode doesn't sync properly
+                    # but it has already exited, so this should finish very quickly
+                    sentinel_map[done_id].join()
+                    # attempts to catch segfaults and other errors that cannot be caught by python (i.g. sigkill)
+                    if sentinel_map[done_id].exitcode != 0:
+                        proc_err_msg = f"Process: {sentinel_map[done_id].name} exited with non-zero code {sentinel_map[done_id].exitcode}"
+                        for stream in data_streams:
+                            stream.set_error(
+                                sentinel_map[done_id].name, TaskError(proc_err_msg), ""
+                            )
+                        has_error = True
+                        break
 
-        sentinel_map = {proc.sentinel: proc for proc in processes}
-        sentinel_set = {proc.sentinel for proc in processes}
-        while sentinel_set and not has_error:
-            done_sentinels = mp_connection.wait(list(sentinel_set))
-            sentinel_set -= set(done_sentinels)
-            for done_id in done_sentinels:
-                # for some reason needs a join, or the exitcode doesn't sync properly
-                # but it has already exited, so this should finish very quickly
-                sentinel_map[done_id].join()
-                # attempts to catch segfaults and other errors that cannot be caught by python (i.g. sigkill)
-                if sentinel_map[done_id].exitcode != 0:
-                    proc_err_msg = f"Process: {sentinel_map[done_id].name} exited with non-zero code {sentinel_map[done_id].exitcode}"
-                    for stream in data_streams:
-                        stream.set_error(
-                            sentinel_map[done_id].name, TaskError(proc_err_msg), ""
-                        )
-                    has_error = True
-                    break
+            if has_error:
+                # first entry on the error queue should hopefully be the original error, just raise that one single error
+                (task_name, task_err, traceback_str), _ = err_queue.get()
+                # should only be at most one unique error, just raise it
+                raise TaskError(
+                    f"Task; {task_name} errored\n{traceback_str}\n{task_err}"
+                ) from task_err
 
-    except BaseException as err:  # pylint: disable=broad-except
-        tb_str = traceback.format_exc()
-        has_error = True
-        for stream in data_streams:
-            stream.set_error("_main_thread", err, tb_str)
+        except BaseException as err:  # pylint: disable=broad-except
+            if not has_error:
+                # one of the other processes didn't set an error, so it must be the main process that is the problem
+                has_error = True
+                tb_str = traceback.format_exc()
+                for stream in data_streams:
+                    stream.set_error("_main_thread", err, tb_str)
 
-    finally:
-        # reset sigterm handling to default behavior
-        signal.signal(signal.SIGTERM, old_sigterm_handling)
+            # joins processes as cleanup if they successfully exited
+            # give them a decent amount of time to process their current task and exit cleanly
+            for proc in processes:
+                proc.join(timeout=15.0)
+            # escalate, send sigterm to processes
+            for proc in processes:
+                proc.terminate()
+            # wait for terminate signal to propogate through the processes
+            for proc in processes:
+                proc.join(timeout=5.0)
+            # force kill the processes (only if they are refusing to terminate cleanly)
+            for proc in processes:
+                proc.kill()
+                proc.join()
 
-        # joins processes as cleanup if they successfully exited
-        # give them a decent amount of time to process their current task and exit cleanly
-        for proc in processes:
-            proc.join(timeout=15.0)
-        # escalate, send sigterm to processes
-        for proc in processes:
-            proc.terminate()
-        # wait for terminate signal to propogate through the processes
-        for proc in processes:
-            proc.join(timeout=5.0)
-        # force kill the processes (only if they are refusing to terminate cleanly)
-        for proc in processes:
-            proc.kill()
-            proc.join()
-
-        if has_error:
-            # first entry on the error queue should hopefully be the original error, just raise that one single error
-            (task_name, task_err, traceback_str), _ = err_queue.get()
-            # should only be at most one unique error, just raise it
-            raise TaskError(
-                f"Task; {task_name} errored\n{traceback_str}\n{task_err}"
-            ) from task_err
+            raise err
