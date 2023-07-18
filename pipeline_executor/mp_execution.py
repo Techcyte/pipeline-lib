@@ -264,7 +264,7 @@ class BufferedQueue(AsyncQueue):
             out_buffer = out_of_band_view[
                 ALIGN_SIZE + cur_pos : ALIGN_SIZE + cur_pos + chunk_size
             ]
-            if self.shared_buffer:
+            if not self.shared_buffer:
                 # NOTE: this copies the memory out of shared memory, which is quite expensive
                 # but can cause serious problems if references to this shared memory is kept
                 # and is also passed to another pipeline step
