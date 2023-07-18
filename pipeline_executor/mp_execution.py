@@ -149,7 +149,13 @@ class BufferedQueue(AsyncQueue):
     commit 82e01b395e736e5c1cdaae7e1bd8a7dca3f78435 vs commit 89111ffea55063fd40f1894315b8c26673cbe6ce
     """
 
-    def __init__(self, buf_size: int, max_num_elements: int, shared_buffer: bool, ctx: BaseContext) -> None:
+    def __init__(
+        self,
+        buf_size: int,
+        max_num_elements: int,
+        shared_buffer: bool,
+        ctx: BaseContext,
+    ) -> None:
         self.max_num_elements = max_num_elements
         self.orig_buf_size = buf_size
         # round buffer size up to align size so that every packets buffer starts as aligned
@@ -260,7 +266,7 @@ class BufferedQueue(AsyncQueue):
             ]
             if self.shared_buffer:
                 # NOTE: this copies the memory out of shared memory, which is quite expensive
-                # but can cause serious problems if references to this shared memory is kept 
+                # but can cause serious problems if references to this shared memory is kept
                 # and is also passed to another pipeline step
                 out_buffer = bytearray(out_buffer)
             yield out_buffer
@@ -538,7 +544,8 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
     worker_tasks = tasks[1:-1]
 
     n_total_tasks = sum(task.num_workers for task in tasks)
-    err_queue = BufferedQueue(ERR_BUF_SIZE, n_total_tasks + 2, ctx)
+    # use a bufferedqueue because it synchronizes instantly, unlike PipedQueue or mp.queue
+    err_queue = BufferedQueue(ERR_BUF_SIZE, n_total_tasks + 2, False, ctx)
     # number of processes are of the producing task
     data_streams = [
         TaskOutput(

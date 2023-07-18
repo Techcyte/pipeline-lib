@@ -417,7 +417,11 @@ def sum_arrays(messages: Iterable[Dict[str, Any]]) -> Iterable[int]:
 @pytest.mark.parametrize("n_procs,packets_in_flight", [(1, 1), (1, 4), (4, 16)])
 @pytest.mark.parametrize("shared_buffer", [True, False])
 def test_many_large_packets_correctness(
-    tmpdir, n_procs: int, packets_in_flight: int, shared_buffer: bool, parallelism: ParallelismStrategy
+    tmpdir,
+    n_procs: int,
+    packets_in_flight: int,
+    shared_buffer: bool,
+    parallelism: ParallelismStrategy,
 ):
     tasks = [
         PipelineTask(

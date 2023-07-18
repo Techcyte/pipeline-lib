@@ -122,3 +122,8 @@ def _sanity_check_mp_params(task: PipelineTask):
         raise PipelineTypeError(
             f"In task {task.name}, packets_in_flight {task.packets_in_flight} is less than num_workers {task.num_workers}, which can lead to deadlocks."
         )
+
+    if task.shared_buffer and task.max_message_size is None:
+        raise PipelineTypeError(
+            f"In task {task.name}, shared_buffer={task.shared_buffer}, but max_message_size is None, which has no effect, as shared_buffer only operates when the max_message_size is set"
+        )

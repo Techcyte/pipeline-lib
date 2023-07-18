@@ -17,6 +17,7 @@ def test_get_func_args():
     assert get_func_args(generate_numbers) == (None, int, [])
     assert get_func_args(group_numbers) == (int, List[int], ["num_groups"])
     assert get_func_args(print_numbers) == (int, None, [])
+
     # test kw only arguments
     def kwarg_func(x: Iterable[int], arg2: float, *, arg3: str) -> Iterable[str]:
         pass
