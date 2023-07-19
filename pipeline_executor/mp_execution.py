@@ -157,7 +157,13 @@ class BufferedQueue(AsyncQueue):
     commit 82e01b395e736e5c1cdaae7e1bd8a7dca3f78435 vs commit 89111ffea55063fd40f1894315b8c26673cbe6ce
     """
 
-    def __init__(self, buf_size: int, max_num_elements: int, ctx: BaseContext) -> None:
+    def __init__(
+        self,
+        buf_size: int,
+        max_num_elements: int,
+        shared_buffer: bool,
+        ctx: BaseContext,
+    ) -> None:
         self.max_num_elements = max_num_elements
         self.orig_buf_size = buf_size
         # round buffer size up to align size so that every packets buffer starts as aligned
@@ -171,6 +177,7 @@ class BufferedQueue(AsyncQueue):
         )
         self.buf_sizes = ctx.RawArray(ctypes.c_int, self.max_num_elements)
         self.entry_alloc = CyclicAllocator(max_num_elements, ctx)
+        self.shared_buffer = shared_buffer
 
     def put(self, item: Any):
         write_pos = self.entry_alloc.pop_write_pos()
@@ -262,13 +269,14 @@ class BufferedQueue(AsyncQueue):
             chunk_size = int(out_of_band_size_view[cur_pos // 4])
             if chunk_size == END_OF_BUFFER_ID:
                 break
-            # NOTE: this copies the memory out of shared memory, which is quite expensive
-            # but can cause serious problems if references to this shared memory is passed to another pipeline
-            out_buffer = bytearray(
-                out_of_band_view[
-                    ALIGN_SIZE + cur_pos : ALIGN_SIZE + cur_pos + chunk_size
-                ]
-            )
+            out_buffer = out_of_band_view[
+                ALIGN_SIZE + cur_pos : ALIGN_SIZE + cur_pos + chunk_size
+            ]
+            if not self.shared_buffer:
+                # NOTE: this copies the memory out of shared memory, which is quite expensive
+                # but can cause serious problems if references to this shared memory is kept
+                # and is also passed to another pipeline step
+                out_buffer = bytearray(out_buffer)
             yield out_buffer
             cur_pos += roundup_to_align(ALIGN_SIZE + chunk_size)
 
@@ -399,6 +407,7 @@ class TaskOutput:
         packets_in_flight: int,
         error_info: BufferedQueue,
         max_message_size: Optional[int],
+        shared_buffer: bool,
         ctx: BaseContext,
     ) -> None:
         self.num_tasks_remaining = ctx.Value("i", num_upstream_tasks, lock=True)
@@ -407,7 +416,7 @@ class TaskOutput:
         # using a custom queue implementation rather than multiprocessing.queue
         # because mp.Queue has strange synchronization properties with the semaphores, leading to many bugs
         self.queue = (
-            BufferedQueue(max_message_size, packets_in_flight + 1, ctx)
+            BufferedQueue(max_message_size, packets_in_flight + 1, shared_buffer, ctx)
             if max_message_size is not None
             else PipedQueue(packets_in_flight + 1, ctx)
         )
@@ -567,7 +576,8 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
     worker_tasks = tasks[1:-1]
 
     n_total_tasks = sum(task.num_workers for task in tasks)
-    err_queue = BufferedQueue(ERR_BUF_SIZE, n_total_tasks + 2, ctx)
+    # use a bufferedqueue because it synchronizes instantly, unlike PipedQueue or mp.queue
+    err_queue = BufferedQueue(ERR_BUF_SIZE, n_total_tasks + 2, False, ctx)
     # number of processes are of the producing task
     data_streams = [
         TaskOutput(
@@ -575,6 +585,7 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
             t.packets_in_flight,
             err_queue,
             max_message_size=t.max_message_size,
+            shared_buffer=t.shared_buffer,
             ctx=ctx,
         )
         for t in tasks[:-1]

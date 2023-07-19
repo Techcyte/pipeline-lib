@@ -23,6 +23,12 @@ class PipelineTask:
     # if set to None, then no limit on message size, but
     # message reads will be much slower
     max_message_size: Optional[int] = None
+    # when max_message_size is set, the downstream pipeline reads memory from
+    # a shared buffer without copying. This is valid if the downstream pipeline step
+    # deletes all references to all the data it receives from the previous iteration
+    # of the iterable
+    # default is to copy this buffer to guarentee no data races
+    shared_buffer: bool = False
 
     @property
     def name(self) -> str:

@@ -469,19 +469,26 @@ def sum_arrays(messages: Iterable[Dict[str, Any]]) -> Iterable[int]:
 
 @pytest.mark.parametrize("parallelism", all_parallelism_options)
 @pytest.mark.parametrize("n_procs,packets_in_flight", [(1, 1), (1, 4), (4, 16)])
+@pytest.mark.parametrize("shared_buffer", [True, False])
 def test_many_large_packets_correctness(
-    tmpdir, n_procs: int, packets_in_flight: int, parallelism: ParallelismStrategy
+    tmpdir,
+    n_procs: int,
+    packets_in_flight: int,
+    shared_buffer: bool,
+    parallelism: ParallelismStrategy,
 ):
     tasks = [
         PipelineTask(
             generate_large_messages,
             max_message_size=BIG_MESSAGE_BYTES,
+            shared_buffer=shared_buffer,
         ),
         PipelineTask(
             process_message,
             max_message_size=BIG_MESSAGE_BYTES,
             num_workers=n_procs,
             packets_in_flight=packets_in_flight,
+            shared_buffer=shared_buffer,
         ),
         PipelineTask(
             process_message,
