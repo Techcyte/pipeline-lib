@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from typing import Any, Dict
 
 import numpy as np
+import psutil
 import pytest
 
 import pipeline_executor
@@ -300,6 +301,59 @@ def test_single_worker_unexpected_exit(parallelism: ParallelismStrategy):
         execute(tasks, parallelism)
 
 
+def consume_infinite_ints(vals: Iterable[int]) -> None:
+    for _ in vals:
+        pass
+
+
+def start_pipeline(parallelism: ParallelismStrategy):
+    execute(
+        [
+            PipelineTask(
+                generate_infinite,
+            ),
+            PipelineTask(consume_infinite_ints, num_workers=2, packets_in_flight=2),
+        ],
+        parallelism=parallelism,
+    )
+
+
+@pytest.mark.parametrize("parallelism", ["process-spawn", "process-fork"])
+def test_main_process_sigterm(parallelism: ParallelismStrategy):
+    """
+    If main process receives a sigterm signal,
+    all the other processes should exit cleanly and quickly
+    """
+    ctx = mp.get_context("spawn")
+    proc = ctx.Process(target=start_pipeline, args=(parallelism,))
+    proc.start()
+    # wait for worker processes to start up
+    time.sleep(2.0)
+
+    # collect all living child processes
+    child_procs = psutil.Process(proc.pid).children()
+    # there are 3 child processes we expect
+    # 1 generate_infinite process, 2 consume_infinite_ints processes
+    assert len(child_procs) == 3
+
+    # send a sigterm signal to the main process
+    os.kill(proc.pid, signal.SIGTERM)
+
+    # waits for all the processes to shut down
+    proc.join(3.0)
+    assert (
+        proc.exitcode is not None
+    ), "join timed out, main process did not exist promptly after signterm"
+    assert (
+        proc.exitcode == -15
+    ), "main process should return a -15 error code after being hit with a sigterm"
+
+    for proc in child_procs:
+        assert not psutil.pid_exists(
+            proc.pid
+        ), "main process didn't exit and join children during its shutdown process"
+
+
 def generate_many() -> Iterable[int]:
     yield from range(30000)
 
@@ -483,5 +537,6 @@ def test_zero_size_np_arrays(parallelism: bool):
 if __name__ == "__main__":
     # failed at:
     # :test_many_large_packets_correctness[4-16-process-spawn-1-10]
-    test_many_large_packets_correctness("/tmp", 2, 4, "process-spawn")
+    # test_many_large_packets_correctness("/tmp", 2, 4, "process-spawn")
     # test_zero_size_np_arrays("process-spawn")
+    test_main_process_sigterm("process-fork")

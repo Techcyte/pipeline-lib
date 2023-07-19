@@ -23,7 +23,7 @@ def load_images(imgs: List[str]) -> Iterable[np.ndarray]:
     for img in imgs:
         with urllib.request.urlopen(img) as response:
             img_pil = Image.open(response, formats=["JPEG"])
-            img_numpy = np.ndarray(img_pil)
+            img_numpy = np.array(img_pil)
             yield img_numpy
 
 
