@@ -1,5 +1,6 @@
 import contextlib
 import ctypes
+import logging
 import multiprocessing as mp
 import multiprocessing.connection as mp_connection
 import os
@@ -19,6 +20,8 @@ from typing import Any, Iterable, List, Literal, Optional, Tuple
 from .pipeline_task import PipelineTask, TaskError
 from .type_checking import MAX_NUM_WORKERS, type_check_tasks
 
+logger = logging.getLogger(__name__)
+
 ERR_BUF_SIZE = 2**16
 # some arbitrary, hopefully unused number that signals python exiting after placing the error in the queue
 PYTHON_ERR_EXIT_CODE = 187
@@ -26,7 +29,6 @@ PYTHON_ERR_EXIT_CODE = 187
 ALIGN_SIZE = 32
 
 SpawnContextName = Literal["spawn", "fork", "forkserver"]
-
 
 class PropogateErr(RuntimeError):
     # should never be raised in main scope, meant to act as a proxy
@@ -634,8 +636,12 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
                     # for some reason needs a join, or the exitcode doesn't sync properly
                     # but it has already exited, so this should finish very quickly
                     sentinel_map[done_id].join()
-                    # attempts to catch segfaults and other errors that cannot be caught by python (i.g. sigkill)
-                    if sentinel_map[done_id].exitcode != 0:
+                    if sentinel_map[done_id].exitcode is None:
+                        # unsure what could cause this, but we see it in production sometimes
+                        # when an instance is shutting down
+                        logger.warning("Child process joined with exitcode None.")
+                    elif sentinel_map[done_id].exitcode != 0:
+                        # attempts to catch segfaults and other errors that cannot be caught by python (i.g. sigkill)
                         proc_err_msg = f"Process: {sentinel_map[done_id].name} exited with non-zero code {sentinel_map[done_id].exitcode}"
                         for stream in data_streams:
                             stream.set_error(
