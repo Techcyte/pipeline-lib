@@ -6,7 +6,7 @@ While not all high throughput data processing can be described by sequential dat
 
 ### Example
 
-(see `examples/pytorch_batcher.py`) for the complete example.
+(see `examples/pytorch_batcher.py`) for the complete example. You can run this example by installing the dev dependencies with `pip install ".[dev]"` then running `python -m examples.pytorch_batcher`.
 
 ```python
 # imports ...
