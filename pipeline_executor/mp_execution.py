@@ -521,7 +521,10 @@ def sighandler(signum: int, processes: List[mp.Process]):
         # propogate the signal to children processes
         for proc in processes:
             # os.kill just sends a signal like the command line tool
-            os.kill(proc.ident, signum)
+            try:
+                os.kill(proc.ident, signum)
+            except ProcessLookupError as e:
+                logger.warning(f"Failed to find process {proc.ident}")
         # throw an exception to trigger the exceptional cleanup policy
         raise SignalReceived(signum)
 
