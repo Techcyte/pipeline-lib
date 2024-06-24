@@ -124,7 +124,7 @@ def _warn_parameter_overrides(tasks: List[PipelineTask]):
             )
 
 
-def execute_tr(tasks: List[PipelineTask], inactivity_timeout: int):
+def execute_tr(tasks: List[PipelineTask]):
     # pylint: disable=too-many-branches
     """
     execute tasks until final task completes.

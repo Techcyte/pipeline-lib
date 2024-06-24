@@ -414,7 +414,7 @@ class TaskOutput:
         ctx: BaseContext,
     ) -> None:
         self.num_tasks_remaining = ctx.Value("i", num_upstream_tasks, lock=True)
-        self.last_updated_time = ctx.Value("d", time.monotonic(), lock=False)
+        self.last_updated_time = ctx.Value("d", float("inf"), lock=False)
         self.queue_len = ctx.Semaphore(value=0)
         self.packets_space = ctx.Semaphore(value=packets_in_flight)
         # using a custom queue implementation rather than multiprocessing.queue
@@ -439,7 +439,14 @@ class TaskOutput:
                 # only occurs if error occured or no more producers left
                 break
 
+            # update last updated time so we can tell how long the step takes
+            # so we can time out this whole process step if we want to
+            self.last_updated_time.value = time.monotonic()
+
             yield item
+
+            # Now that this step is no longer doing anything, we can reset the time to infinity
+            self.last_updated_time.value = float("inf")
 
             # frees shared memory buffer so that it can be used elsewhere
             self.queue.free(read_pos)
@@ -447,9 +454,6 @@ class TaskOutput:
             # this release needs to happen after the yield
             # completes to support full synchronization semantics with packets_in_flight=1
             self.packets_space.release()
-
-            # update last updated time
-            self.last_updated_time.value = time.monotonic()
 
     def put_results(self, iterable: Iterable[Any]):
         iterator = iter(iterable)
@@ -562,7 +566,7 @@ def _start_sink(
         exit(PYTHON_ERR_EXIT_CODE)
 
 
-def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName, inactivity_timeout: int | None = None):
+def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
     # pylint: disable=too-many-branches,too-many-locals
     """
     execute tasks until final task completes.
@@ -634,6 +638,8 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName, inacti
     for process in processes:
         process.start()
 
+    process_poll_timeout = min((task.task_timeout / 10 for task in tasks if task.task_timeout is not None), default=None)
+
     # signal setup must be *after* all new processes are started, so that main processes
     # signal handling won't be copied over to children
     with sighandler(signal.SIGINT, processes), sighandler(signal.SIGTERM, processes):
@@ -642,13 +648,15 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName, inacti
             sentinel_map = {proc.sentinel: proc for proc in processes}
             sentinel_set = {proc.sentinel for proc in processes}
             while sentinel_set and not has_error:
-                done_sentinels = mp_connection.wait(list(sentinel_set), timeout=None if inactivity_timeout is None else inactivity_timeout/10)
-                if inactivity_timeout is not None and not done_sentinels:
+                done_sentinels = mp_connection.wait(list(sentinel_set), timeout=process_poll_timeout)
+                if process_poll_timeout is not None and not done_sentinels:
                     # this means the timeout ended,
                     # time to check all of the task outputs timers
-                    last_updated_time = max(float(stream.last_updated_time.value) for stream in data_streams)
-                    if last_updated_time < time.monotonic():
-                        raise InactivityError(f"Last updated time was {time.monotonic() - last_updated_time}s ago.")
+                    for stream, task in zip(data_streams, tasks[:-1]):
+                        # copy value from shared memory
+                        last_updated_time = float(stream.last_updated_time.value)
+                        if task.task_timeout is not None and last_updated_time + task.task_timeout < time.monotonic():
+                            raise InactivityError(f"Task {task.name} exceeded timeout of {last_updated_time}s.")
 
                 sentinel_set -= set(done_sentinels)
                 for done_id in done_sentinels:

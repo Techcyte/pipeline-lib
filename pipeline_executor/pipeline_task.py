@@ -29,6 +29,8 @@ class PipelineTask:
     # of the iterable
     # default is to copy this buffer to guarantee no data races
     shared_buffer: bool = False
+    # if the task takes more than this long to complete a step, then it will error
+    task_timeout: Optional[int] = None
 
     @property
     def name(self) -> str:
