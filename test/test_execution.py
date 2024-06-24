@@ -14,6 +14,7 @@ import pytest
 import pipeline_executor
 from pipeline_executor import PipelineTask, execute
 from pipeline_executor.execution import ParallelismStrategy
+from pipeline_executor.pipeline_task import InactivityError
 
 from .example_funcs import *
 
@@ -145,10 +146,10 @@ def test_sudden_exit_end(parallelism: ParallelismStrategy):
         execute(tasks, parallelism)
 
 
-def sleeper(vals: Iterable[int]) -> Iterable[int]:
+def sleeper(vals: Iterable[int], sleep_time: float) -> Iterable[int]:
     time.sleep(0.1)
     for i in vals:
-        time.sleep(0.01)
+        time.sleep(sleep_time)
         yield i
 
 
@@ -158,11 +159,11 @@ def test_sudden_exit_middle_sleepers(parallelism: ParallelismStrategy):
         PipelineTask(
             generate_numbers,
         ),
-        PipelineTask(sleeper),
+        PipelineTask(sleeper, constants={"sleep_time": 0.1}),
         PipelineTask(
             sudden_exit_fn,
         ),
-        PipelineTask(sleeper),
+        PipelineTask(sleeper, constants={"sleep_time": 0.1}),
         PipelineTask(
             print_numbers,
         ),
@@ -171,11 +172,58 @@ def test_sudden_exit_middle_sleepers(parallelism: ParallelismStrategy):
         execute(tasks, parallelism)
 
 
+def generate_numbers_short() -> Iterable[int]:
+    for i in range(9):
+        yield i
+
+
+@pytest.mark.parametrize("parallelism", ["process-fork", "process-spawn"])
+def test_task_timeout(parallelism: ParallelismStrategy):
+    """
+    If we sleep for 1 second and have a task timeout of 0.1 seconds,
+    we should error due to the task timeout
+    """
+    tasks = [
+        PipelineTask(
+            generate_numbers_short,
+        ),
+        PipelineTask(sleeper, constants={"sleep_time": 1}, task_timeout=0.1),
+        PipelineTask(
+            print_numbers,
+        ),
+    ]
+    with raises_from(InactivityError):
+        execute(tasks, parallelism)
+
+
+@pytest.mark.parametrize("parallelism", ["process-fork", "process-spawn"])
+def test_task_timeout_missed(parallelism: ParallelismStrategy):
+    """
+    If we sleep for 0.1 second and have a task timeout of 1 seconds,
+    we should not error due to the task timeout
+    """
+    tasks = [
+        PipelineTask(
+            generate_numbers,
+        ),
+        PipelineTask(sleeper, constants={"sleep_time": 0.1}, task_timeout=1),
+        PipelineTask(
+            print_numbers,
+        ),
+    ]
+    execute(tasks, parallelism)
+
+
 @pytest.mark.parametrize("parallelism", all_parallelism_options)
 def test_full_contents_buffering(parallelism: ParallelismStrategy):
     tasks = [
         PipelineTask(generate_numbers, packets_in_flight=1000, max_message_size=1000),
-        PipelineTask(sleeper, packets_in_flight=1000, max_message_size=1000),
+        PipelineTask(
+            sleeper,
+            constants={"sleep_time": 0.1},
+            packets_in_flight=1000,
+            max_message_size=1000,
+        ),
         PipelineTask(
             print_numbers,
         ),
@@ -539,4 +587,4 @@ if __name__ == "__main__":
     # :test_many_large_packets_correctness[4-16-process-spawn-1-10]
     # test_many_large_packets_correctness("/tmp", 2, 4, "process-spawn")
     # test_zero_size_np_arrays("process-spawn")
-    test_main_process_sigterm("process-fork")
+    test_task_timeout_missed("process-fork")
