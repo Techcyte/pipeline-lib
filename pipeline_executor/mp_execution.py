@@ -672,7 +672,7 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
                                 # copy value from shared memory
                                 last_updated_time = float(proc_time.value)
                                 if last_updated_time + task.task_timeout < cur_time:
-                                    raise InactivityError(f"Task {task.name} exceeded timeout of {last_updated_time}s.")
+                                    raise InactivityError(f"Task {task.name} exceeded timeout of {task.task_timeout}s taking {cur_time - last_updated_time}s.")
 
                 sentinel_set -= set(done_sentinels)
                 for done_id in done_sentinels:
