@@ -629,9 +629,9 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
     ]
     all_process_times: List[List[Synchronized]] = []
     for i, worker_task in enumerate(worker_tasks):
-        process_times = []
+        process_times: List[Synchronized] = []
         for worker_idx in range(worker_task.num_workers):
-            proc_time = ctx.Value(ctypes.c_double, float("inf"), lock=False)
+            proc_time = ctx.Value('d', float("inf"), lock=False)
             processes.append(
                 ctx.Process(
                     target=_start_worker,
