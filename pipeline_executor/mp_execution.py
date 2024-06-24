@@ -32,6 +32,7 @@ ALIGN_SIZE = 32
 
 SpawnContextName = Literal["spawn", "fork", "forkserver"]
 
+
 class PropogateErr(RuntimeError):
     # should never be raised in main scope, meant to act as a proxy
     # for propogating errors up and down the pipeline
@@ -483,7 +484,10 @@ class TaskOutput:
             self.packets_space.release()
 
 
-def timed_task_generator(in_iter: Iterable, task_start_time:Synchronized):
+def timed_task_generator(in_iter: Iterable, task_start_time: Synchronized):
+    """
+    Times the execution of each iterable in the generator
+    """
     for item in in_iter:
         # update last updated time so we can tell how long the step takes
         # so we can time out this whole process step if we want to
@@ -651,7 +655,10 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
     for process in processes:
         process.start()
 
-    process_poll_timeout = min((task.task_timeout / 10 for task in tasks if task.task_timeout is not None), default=None)
+    process_poll_timeout = min(
+        (task.task_timeout / 10 for task in tasks if task.task_timeout is not None),
+        default=None,
+    )
 
     # signal setup must be *after* all new processes are started, so that main processes
     # signal handling won't be copied over to children
@@ -661,7 +668,9 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
             sentinel_map = {proc.sentinel: proc for proc in processes}
             sentinel_set = {proc.sentinel for proc in processes}
             while sentinel_set and not has_error:
-                done_sentinels = mp_connection.wait(list(sentinel_set), timeout=process_poll_timeout)
+                done_sentinels = mp_connection.wait(
+                    list(sentinel_set), timeout=process_poll_timeout
+                )
                 if process_poll_timeout is not None:
                     cur_time = time.monotonic()
                     # this means the timeout ended,
@@ -672,7 +681,9 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
                                 # copy value from shared memory
                                 last_updated_time = float(proc_time.value)
                                 if last_updated_time + task.task_timeout < cur_time:
-                                    raise InactivityError(f"Task {task.name} exceeded timeout of {task.task_timeout}s taking {cur_time - last_updated_time}s.")
+                                    raise InactivityError(
+                                        f"Task {task.name} exceeded timeout of {task.task_timeout}s taking {cur_time - last_updated_time}s."
+                                    )
 
                 sentinel_set -= set(done_sentinels)
                 for done_id in done_sentinels:

@@ -122,6 +122,10 @@ def _warn_parameter_overrides(tasks: List[PipelineTask]):
             warnings.warn(
                 f"Task '{task.name}' overrode default value of max_message_size, and this override is ignored by 'thread' parallelism strategy."
             )
+        if task.task_timeout != None:
+            warnings.warn(
+                f"Task '{task.name}' overrode default value of task_timeout, and this override is ignored by 'thread' parallelism strategy, which does not currently support this task parameter."
+            )
 
 
 def execute_tr(tasks: List[PipelineTask]):
@@ -130,10 +134,6 @@ def execute_tr(tasks: List[PipelineTask]):
     execute tasks until final task completes.
     Raises error if tasks are inconsistently specified or if
     one of the tasks raises an error.
-
-    Also raises an error if no message passing is observed in any task for
-    at least `inactivity_timeout` seconds.
-    (useful to kill any stuck jobs in a larger distributed system)
     """
     if not tasks:
         return
