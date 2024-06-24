@@ -42,4 +42,6 @@ class PipelineTask:
 class TaskError(RuntimeError):
     """Error for miscellaneous, unidentifiable issues that come up during task execution"""
 
-    pass
+
+class InactivityError(RuntimeError):
+    """Error for when the inactivity timeout expires without any messages being passed"""

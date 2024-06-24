@@ -9,6 +9,7 @@ import queue
 import select
 import signal
 import threading as tr
+import time
 import traceback
 from dataclasses import dataclass
 from functools import reduce
@@ -17,7 +18,7 @@ from multiprocessing.context import BaseContext
 from operator import mul
 from typing import Any, Iterable, List, Literal, Optional, Tuple
 
-from .pipeline_task import PipelineTask, TaskError
+from .pipeline_task import InactivityError, PipelineTask, TaskError
 from .type_checking import MAX_NUM_WORKERS, type_check_tasks
 
 logger = logging.getLogger(__name__)
@@ -413,6 +414,7 @@ class TaskOutput:
         ctx: BaseContext,
     ) -> None:
         self.num_tasks_remaining = ctx.Value("i", num_upstream_tasks, lock=True)
+        self.last_updated_time = ctx.Value("d", time.monotonic(), lock=False)
         self.queue_len = ctx.Semaphore(value=0)
         self.packets_space = ctx.Semaphore(value=packets_in_flight)
         # using a custom queue implementation rather than multiprocessing.queue
@@ -445,6 +447,9 @@ class TaskOutput:
             # this release needs to happen after the yield
             # completes to support full synchronization semantics with packets_in_flight=1
             self.packets_space.release()
+
+            # update last updated time
+            self.last_updated_time.value = time.monotonic()
 
     def put_results(self, iterable: Iterable[Any]):
         iterator = iter(iterable)
@@ -557,12 +562,16 @@ def _start_sink(
         exit(PYTHON_ERR_EXIT_CODE)
 
 
-def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
+def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName, inactivity_timeout: int | None = None):
     # pylint: disable=too-many-branches,too-many-locals
     """
     execute tasks until final task completes.
     Raises error if tasks are inconsistently specified or if
     one of the tasks raises an error.
+
+    Also raises an error if no message passing is observed in any task for
+    at least `inactivity_timeout` seconds.
+    (useful to kill any stuck jobs in a larger distributed system)
     """
     if not tasks:
         return
@@ -633,7 +642,14 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
             sentinel_map = {proc.sentinel: proc for proc in processes}
             sentinel_set = {proc.sentinel for proc in processes}
             while sentinel_set and not has_error:
-                done_sentinels = mp_connection.wait(list(sentinel_set))
+                done_sentinels = mp_connection.wait(list(sentinel_set), timeout=None if inactivity_timeout is None else inactivity_timeout/10)
+                if inactivity_timeout is not None and not done_sentinels:
+                    # this means the timeout ended,
+                    # time to check all of the task outputs timers
+                    last_updated_time = max(float(stream.last_updated_time.value) for stream in data_streams)
+                    if last_updated_time < time.monotonic():
+                        raise InactivityError(f"Last updated time was {time.monotonic() - last_updated_time}s ago.")
+
                 sentinel_set -= set(done_sentinels)
                 for done_id in done_sentinels:
                     # for some reason needs a join, or the exitcode doesn't sync properly

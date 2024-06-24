@@ -124,12 +124,16 @@ def _warn_parameter_overrides(tasks: List[PipelineTask]):
             )
 
 
-def execute_tr(tasks: List[PipelineTask]):
+def execute_tr(tasks: List[PipelineTask], inactivity_timeout: int):
     # pylint: disable=too-many-branches
     """
     execute tasks until final task completes.
     Raises error if tasks are inconsistently specified or if
     one of the tasks raises an error.
+
+    Also raises an error if no message passing is observed in any task for
+    at least `inactivity_timeout` seconds.
+    (useful to kill any stuck jobs in a larger distributed system)
     """
     if not tasks:
         return
