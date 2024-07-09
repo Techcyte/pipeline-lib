@@ -665,7 +665,7 @@ def execute_mp(
                     )
                     if last_updated_time - time.monotonic() > inactivity_timeout:
                         raise InactivityError(
-                            f"Last updated time was {time.monotonic() - last_updated_time}s ago, pipeline inactivity timeout is {inactivity_timeout}."
+                            f"Last updated time was {time.monotonic() - last_updated_time}s ago, pipeline inactivity timeout is {inactivity_timeout}s."
                         )
 
                 sentinel_set -= set(done_sentinels)
