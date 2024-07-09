@@ -3,7 +3,6 @@ import ctypes
 import logging
 import multiprocessing as mp
 import multiprocessing.connection as mp_connection
-from multiprocessing.sharedctypes import Synchronized
 import os
 import pickle
 import queue
@@ -416,6 +415,7 @@ class TaskOutput:
         ctx: BaseContext,
     ) -> None:
         self.num_tasks_remaining = ctx.Value("i", num_upstream_tasks, lock=True)
+        self.last_updated_time = ctx.Value("d", time.monotonic(), lock=False)
         self.queue_len = ctx.Semaphore(value=0)
         self.packets_space = ctx.Semaphore(value=packets_in_flight)
         # using a custom queue implementation rather than multiprocessing.queue
@@ -448,6 +448,9 @@ class TaskOutput:
             # this release needs to happen after the yield
             # completes to support full synchronization semantics with packets_in_flight=1
             self.packets_space.release()
+
+            # update last updated time
+            self.last_updated_time.value = time.monotonic()
 
     def put_results(self, iterable: Iterable[Any]):
         iterator = iter(iterable)
@@ -484,21 +487,6 @@ class TaskOutput:
             self.packets_space.release()
 
 
-def timed_task_generator(in_iter: Iterable, task_start_time: Synchronized):
-    """
-    Times the execution of each iterable in the generator
-    """
-    for item in in_iter:
-        # update last updated time so we can tell how long the step takes
-        # so we can time out this whole process step if we want to
-        task_start_time.value = time.monotonic()
-
-        yield item
-
-        # Now that this step is no longer doing anything, we can reset the time to infinity
-        task_start_time.value = float("inf")
-
-
 def _start_source(
     task: PipelineTask,
     downstream: TaskOutput,
@@ -518,11 +506,9 @@ def _start_worker(
     task: PipelineTask,
     upstream: TaskOutput,
     downstream: TaskOutput,
-    task_start_time: Synchronized,
 ):
     try:
         generator_input = upstream.iter_results()
-        generator_input = timed_task_generator(generator_input, task_start_time)
         out_iter = task.generator(generator_input, **task.constants_dict)
         downstream.put_results(out_iter)
     except Exception as err:  # pylint: disable=broad-except
@@ -577,7 +563,11 @@ def _start_sink(
         exit(PYTHON_ERR_EXIT_CODE)
 
 
-def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
+def execute_mp(
+    tasks: List[PipelineTask],
+    spawn_method: SpawnContextName,
+    inactivity_timeout: float | None = None,
+):
     # pylint: disable=too-many-branches,too-many-locals
     """
     execute tasks until final task completes.
@@ -627,21 +617,15 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
         )
         for worker_idx in range(source_task.num_workers)
     ]
-    all_process_times: List[List[Synchronized]] = []
     for i, worker_task in enumerate(worker_tasks):
-        process_times: List[Synchronized] = []
         for worker_idx in range(worker_task.num_workers):
-            proc_time = ctx.Value('d', float("inf"), lock=False)
             processes.append(
                 ctx.Process(
                     target=_start_worker,
-                    args=(worker_task, data_streams[i], data_streams[i + 1], proc_time),
+                    args=(worker_task, data_streams[i], data_streams[i + 1]),
                     name=f"{worker_task}_{worker_idx}",
                 )
             )
-            process_times.append(proc_time)
-
-        all_process_times.append(process_times)
 
     for worker_idx in range(sink_task.num_workers):
         processes.append(
@@ -655,11 +639,6 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
     for process in processes:
         process.start()
 
-    process_poll_timeout = min(
-        (task.task_timeout / 10 for task in tasks if task.task_timeout is not None),
-        default=None,
-    )
-
     # signal setup must be *after* all new processes are started, so that main processes
     # signal handling won't be copied over to children
     with sighandler(signal.SIGINT, processes), sighandler(signal.SIGTERM, processes):
@@ -669,21 +648,24 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
             sentinel_set = {proc.sentinel for proc in processes}
             while sentinel_set and not has_error:
                 done_sentinels = mp_connection.wait(
-                    list(sentinel_set), timeout=process_poll_timeout
+                    list(sentinel_set),
+                    timeout=None
+                    if inactivity_timeout is None
+                    else inactivity_timeout / 10,
                 )
-                if process_poll_timeout is not None:
-                    cur_time = time.monotonic()
+                last_updated_time = max(
+                    float(stream.last_updated_time.value) for stream in data_streams
+                )
+                if inactivity_timeout is not None and not done_sentinels:
                     # this means the timeout ended,
                     # time to check all of the task outputs timers
-                    for process_times, task in zip(all_process_times, tasks[:-1]):
-                        if task.task_timeout is not None:
-                            for proc_time in process_times:
-                                # copy value from shared memory
-                                last_updated_time = float(proc_time.value)
-                                if last_updated_time + task.task_timeout < cur_time:
-                                    raise InactivityError(
-                                        f"Task {task.name} exceeded timeout of {task.task_timeout}s taking {cur_time - last_updated_time}s."
-                                    )
+                    last_updated_time = max(
+                        float(stream.last_updated_time.value) for stream in data_streams
+                    )
+                    if time.monotonic() - last_updated_time > inactivity_timeout:
+                        raise InactivityError(
+                            f"Last updated time was {time.monotonic() - last_updated_time}s ago, pipeline inactivity timeout is {inactivity_timeout}s."
+                        )
 
                 sentinel_set -= set(done_sentinels)
                 for done_id in done_sentinels:

@@ -122,10 +122,6 @@ def _warn_parameter_overrides(tasks: List[PipelineTask]):
             warnings.warn(
                 f"Task '{task.name}' overrode default value of max_message_size, and this override is ignored by 'thread' parallelism strategy."
             )
-        if task.task_timeout != None:
-            warnings.warn(
-                f"Task '{task.name}' overrode default value of task_timeout, and this override is ignored by 'thread' parallelism strategy, which does not currently support this task parameter."
-            )
 
 
 def execute_tr(tasks: List[PipelineTask]):
