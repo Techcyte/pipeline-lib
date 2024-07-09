@@ -16,10 +16,9 @@ def _warn_parameter_overrides(tasks: List[PipelineTask]):
             task.max_message_size != DEFAULT_BUF_SIZE
             or task.num_workers != DEFAULT_NUM_WORKERS
             or task.packets_in_flight != DEFAULT_PACKETS_IN_FLIGHT
-            or task.task_timeout != None
         ):
             warnings.warn(
-                f"Task '{task.name}' overrode default value of max_message_size, num_workers, packets_in_flight, or task_timeout, and this override is ignored by 'coroutine' parallelism strategy."
+                f"Task '{task.name}' overrode default value of max_message_size, num_workers, or packets_in_flight, and this override is ignored by 'coroutine' parallelism strategy."
             )
 
 
