@@ -211,6 +211,8 @@ def test_inactivity_timeout_missed(parallelism: ParallelismStrategy):
             print_numbers,
         ),
     ]
+    # pipeline step should take about 10 seconds, 100 iters of 0.1 seconds each, so
+    # this catches that it is only inactivity
     execute(tasks, parallelism, inactivity_timeout=1)
 
 
@@ -634,4 +636,4 @@ if __name__ == "__main__":
     # :test_many_large_packets_correctness[4-16-process-spawn-1-10]
     # test_many_large_packets_correctness("/tmp", 2, 4, "process-spawn")
     # test_zero_size_np_arrays("process-spawn")
-    test_hang_message_passing_timeout("/tmp", None, "process-fork")
+    test_hang_message_passing_timeout("/tmp", BIG_MESSAGE_BYTES, "process-spawn")
