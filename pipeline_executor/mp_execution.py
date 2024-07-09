@@ -656,14 +656,13 @@ def execute_mp(
                 last_updated_time = max(
                     float(stream.last_updated_time.value) for stream in data_streams
                 )
-                print(done_sentinels, last_updated_time, inactivity_timeout)
                 if inactivity_timeout is not None and not done_sentinels:
                     # this means the timeout ended,
                     # time to check all of the task outputs timers
                     last_updated_time = max(
                         float(stream.last_updated_time.value) for stream in data_streams
                     )
-                    if last_updated_time - time.monotonic() > inactivity_timeout:
+                    if time.monotonic() - last_updated_time > inactivity_timeout:
                         raise InactivityError(
                             f"Last updated time was {time.monotonic() - last_updated_time}s ago, pipeline inactivity timeout is {inactivity_timeout}s."
                         )
