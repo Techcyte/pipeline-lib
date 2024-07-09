@@ -663,9 +663,9 @@ def execute_mp(
                     last_updated_time = max(
                         float(stream.last_updated_time.value) for stream in data_streams
                     )
-                    if last_updated_time < time.monotonic():
+                    if last_updated_time - time.monotonic() > inactivity_timeout:
                         raise InactivityError(
-                            f"Last updated time was {time.monotonic() - last_updated_time}s ago."
+                            f"Last updated time was {time.monotonic() - last_updated_time}s ago, pipeline inactivity timeout is {inactivity_timeout}."
                         )
 
                 sentinel_set -= set(done_sentinels)
