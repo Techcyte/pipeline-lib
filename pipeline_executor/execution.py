@@ -28,7 +28,7 @@ def execute(
     if parallelism == "thread":
         assert (
             inactivity_timeout is None
-        ), "'thread' parallelism does not support inactivity timeout, please only choose "
+        ), "'thread' parallelism does not support inactivity timeout, please choose 'process-fork' or 'process-spawn'"
         execute_tr(tasks)
     elif parallelism == "process-spawn":
         execute_mp(tasks, "spawn")
