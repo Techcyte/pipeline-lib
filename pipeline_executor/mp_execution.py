@@ -31,6 +31,7 @@ ALIGN_SIZE = 32
 
 SpawnContextName = Literal["spawn", "fork", "forkserver"]
 
+
 class PropogateErr(RuntimeError):
     # should never be raised in main scope, meant to act as a proxy
     # for propogating errors up and down the pipeline
@@ -562,7 +563,11 @@ def _start_sink(
         exit(PYTHON_ERR_EXIT_CODE)
 
 
-def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName, inactivity_timeout: float | None = None):
+def execute_mp(
+    tasks: List[PipelineTask],
+    spawn_method: SpawnContextName,
+    inactivity_timeout: float | None = None,
+):
     # pylint: disable=too-many-branches,too-many-locals
     """
     execute tasks until final task completes.
@@ -642,15 +647,26 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName, inacti
             sentinel_map = {proc.sentinel: proc for proc in processes}
             sentinel_set = {proc.sentinel for proc in processes}
             while sentinel_set and not has_error:
-                done_sentinels = mp_connection.wait(list(sentinel_set), timeout=None if inactivity_timeout is None else inactivity_timeout/10)
-                last_updated_time = max(float(stream.last_updated_time.value) for stream in data_streams)
+                done_sentinels = mp_connection.wait(
+                    list(sentinel_set),
+                    timeout=None
+                    if inactivity_timeout is None
+                    else inactivity_timeout / 10,
+                )
+                last_updated_time = max(
+                    float(stream.last_updated_time.value) for stream in data_streams
+                )
                 print(done_sentinels, last_updated_time, inactivity_timeout)
                 if inactivity_timeout is not None and not done_sentinels:
                     # this means the timeout ended,
                     # time to check all of the task outputs timers
-                    last_updated_time = max(float(stream.last_updated_time.value) for stream in data_streams)
+                    last_updated_time = max(
+                        float(stream.last_updated_time.value) for stream in data_streams
+                    )
                     if last_updated_time < time.monotonic():
-                        raise InactivityError(f"Last updated time was {time.monotonic() - last_updated_time}s ago.")
+                        raise InactivityError(
+                            f"Last updated time was {time.monotonic() - last_updated_time}s ago."
+                        )
 
                 sentinel_set -= set(done_sentinels)
                 for done_id in done_sentinels:

@@ -11,7 +11,11 @@ ParallelismStrategy = Literal["thread", "process-fork", "process-spawn", "corout
 PARALLELISM_STRATEGIES: Tuple[str, ...] = get_args(ParallelismStrategy)
 
 
-def execute(tasks: List[PipelineTask], parallelism: ParallelismStrategy = "thread", inactivity_timeout: float | None = None):
+def execute(
+    tasks: List[PipelineTask],
+    parallelism: ParallelismStrategy = "thread",
+    inactivity_timeout: float | None = None,
+):
     """
     execute tasks until final task completes.
     Raises error if tasks are inconsistently specified or if
@@ -22,14 +26,18 @@ def execute(tasks: List[PipelineTask], parallelism: ParallelismStrategy = "threa
     (useful to kill any stuck jobs in a larger distributed system)
     """
     if parallelism == "thread":
-        assert inactivity_timeout is None, "'thread' parallelism does not support inactivity timeout, please only choose "
+        assert (
+            inactivity_timeout is None
+        ), "'thread' parallelism does not support inactivity timeout, please only choose "
         execute_tr(tasks)
     elif parallelism == "process-spawn":
         execute_mp(tasks, "spawn")
     elif parallelism == "process-fork":
         execute_mp(tasks, "fork", inactivity_timeout=inactivity_timeout)
     elif parallelism == "coroutine":
-        assert inactivity_timeout is None, "'coroutine' parallelism does not support inactivity timeout, please choose parallelism='process-fork' or parallelism='process-spawn'"
+        assert (
+            inactivity_timeout is None
+        ), "'coroutine' parallelism does not support inactivity timeout, please choose parallelism='process-fork' or parallelism='process-spawn'"
         execute_seq(tasks)
     else:
         raise ValueError(

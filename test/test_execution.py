@@ -571,7 +571,7 @@ def hang_message_passing() -> Iterable[Dict[str, Any]]:
 
 # if it takes more than 10 seconds for a 5 second timeout to complete, something is wrong
 @pytest.mark.timeout(120)
-@pytest.mark.parametrize("parallelism", ['process-fork', 'process-spawn'])
+@pytest.mark.parametrize("parallelism", ["process-fork", "process-spawn"])
 @pytest.mark.parametrize("max_message_size", [BIG_MESSAGE_BYTES, None])
 def test_hang_message_passing_timeout(
     tmpdir,
@@ -634,4 +634,4 @@ if __name__ == "__main__":
     # :test_many_large_packets_correctness[4-16-process-spawn-1-10]
     # test_many_large_packets_correctness("/tmp", 2, 4, "process-spawn")
     # test_zero_size_np_arrays("process-spawn")
-    test_hang_message_passing_timeout('/tmp', None, "process-fork")
+    test_hang_message_passing_timeout("/tmp", None, "process-fork")
