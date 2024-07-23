@@ -122,10 +122,11 @@ def benchmark_execution():
             ParameterCombination(4, 12, "parallel", parallel_type),
         ]
     ]
-    functions = [run_small_messages, run_big_messages, run_big_messages_no_buffer]
-    message_sizes = [100, BIG_MESSAGE_BYTES, BIG_MESSAGE_BYTES]
-    num_messages = [N_MANY_MESSAGES, N_BIG_MESSAGES, N_BIG_MESSAGES]
-    buffer_type = ["pipe", "shared-mem", "pipe"]
+    functions = [run_small_messages,run_small_messages, run_big_messages, run_big_messages_no_buffer]
+    message_sizes = [100,100, BIG_MESSAGE_BYTES, BIG_MESSAGE_BYTES]
+    num_messages = [N_MANY_MESSAGES,N_MANY_MESSAGES, N_BIG_MESSAGES, N_BIG_MESSAGES]
+    buffer_sizes = [None, BIG_MESSAGE_BYTES, None, BIG_MESSAGE_BYTES, ]
+    buffer_type = ["pipe", "shared-mem", "pipe", "shared-mem", ]
     markdown_lines = []
     markdown_lines.append(
         "num messages|message size|message type|"
@@ -134,13 +135,13 @@ def benchmark_execution():
         )
     )
     markdown_lines.append("|".join(["---"] * (len(parameter_combinations) + 3)))
-    for msg_size, n_msgs, buf_type, run_fn in zip(
-        message_sizes, num_messages, buffer_type, functions
+    for msg_size, n_msgs, buf_type, buf_size, run_fn in zip(
+        message_sizes, num_messages, buffer_type, buffer_sizes, functions
     ):
         results = []
         for comb in parameter_combinations:
             start_t = time.time()
-            run_fn(comb.n_procs, comb.packets_in_flight, comb.parallel_type)
+            run_fn(comb.n_procs, comb.packets_in_flight, comb.parallel_type, buf_size)
             end_t = time.time()
             results.append(end_t - start_t)
         max_val = min(results)

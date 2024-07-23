@@ -1,8 +1,12 @@
 ## Pipeline executor
 
-This library allows for simple, dynamic generation of a high throughput sequential data processing pipeline in python.
+What Python's `multiprocessing.Pool` provides for data parallelism, this library attempts to provide for stream parallelism: high quality pythonic tooling for supporting simple, fast, pure-python parallel stream processing.
 
-While not all high throughput data processing can be described by sequential data pipelines, when it can be, this library enables clean, reliabile, testable, and performant code built on top of, simple, pythonic unit testable iterator based compute units.
+This tooling keeps users in control of process state so this tooling remains simple, light-weight and robust while scaling to the complexities of modern hardware (GPU managment, high CPU counts, network-driven workflows, etc) and modern stream-processing workflows (deep learning inference and computational biology/chemistry).
+
+The framework utilizes best-of-class practices in python multiprocessing with an ambition to drive multiprocessing bugs to zero. Heavy-load testing is used to try to detect parallelism bugs with brute force, and detected bugs are not simply "patched" they are left open until solved theoretically and tested heavily. Users are encouraged to not use any concurrency primitives, and instead rely on the iterator pattern in the framework.
+
+## Usage
 
 ### Example
 
@@ -93,6 +97,14 @@ def main():
 
 ```
 
+### Step Requirements
+
+* Each pipeline step except the last one must be a python generator that uses the `yield` syntax.
+* Each pipeline step must generate pickleable data. If you have objects which are not pickeable by default, you can wrap them in an object and manually create `__setstate__` and `__getstate__` methods to serialize/deserialize your data.
+* To keep code quality high, each pipeline step must be type hinted (checked at runtime).
+
+## Design
+
 ### Compute model
 
 A Pipeline has three parts:
@@ -109,9 +121,9 @@ The runtime execution model has a few key concepts:
 
 #### Synchronous processing
 
-A unique feature of the pipeline lib is *synchronous processing*, an odd feature in a parallel pipeline, but one designed to minimize the amount of total work being handled by a single executor. This is built for distributed data processing systems where each worker is consuming from a shared pool of work, and should not reserve too much work for itself that it cannot process quickly.
+A unique feature of the pipeline lib is *synchronous processing*, an odd feature in a parallel pipeline, but one designed to minimize total processing latency when needed.  This is particularly useful for distributed data processing systems where each worker is consuming from a shared pool of work, and should not reserve too much work for itself that it cannot process quickly.
 
-This tradeoff between synchronous vs asynchronous control, in other words, the tradeoff between latency vs bandwidth of pipeline message processing is controlled by a single parameter `packets_in_flight`. From a consumer's perspective, the `packets_in_flight` is an ordinary queue buffer size. If there are avaliable packets that a producer has placed in the buffer, then the consumer can consume them. For example, see the following diagram, which is limited by producer capacity.
+This tradeoff latency vs bandwidth of pipeline message processing is controlled by a single parameter `packets_in_flight`. From a consumer's perspective, the `packets_in_flight` is an ordinary queue buffer size. If there are avaliable packets that a producer has placed in the buffer, then the consumer can consume them. For example, see the following diagram, which is limited by producer capacity.
 
 ![producer bound system](docs/producer_bound.png)
 
@@ -171,3 +183,13 @@ Two insights are:
 
 1. Multiprocessing has more overhead than threads, which have more overhead than sequential coroutines. But of course, the amount of possible parallelism is maximized for multiprocessing, limited for threads, and missing for coroutines.
 2. Shared memory communication (with fixed buffer sizes) is much faster than piped (infinite buffer size) communication, especially for larger numpy arrays.
+
+
+## Neighboring projects
+
+### Similar pipeline tooling
+
+* YAPP: C++ stream processing library with simlar archtecture and concepts https://github.com/picanumber/yapp
+* Huge list of pipeline projects of different levels of similarity: https://github.com/pditommaso/awesome-pipeline?tab=readme-ov-file#pipeline-frameworks--libraries
+
+### Downstream projects
