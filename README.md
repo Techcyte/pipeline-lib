@@ -207,6 +207,7 @@ Two insights are:
 ### Similar pipeline tooling
 
 * YAPP: C++ stream processing library with simlar archtecture and concepts https://github.com/picanumber/yapp
+* Apache Beam: Multi-language framework for multi-step data processing that supports streams. https://beam.apache.org/documentation/sdks/python-streaming/
 * Huge list of pipeline projects of different levels of similarity: https://github.com/pditommaso/awesome-pipeline?tab=readme-ov-file#pipeline-frameworks--libraries
 
 ### Downstream projects
