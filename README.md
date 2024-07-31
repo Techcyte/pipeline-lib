@@ -1,12 +1,27 @@
-## Pipeline executor
+## Python Stream Parallelizer
 
-What Python's `multiprocessing.Pool` provides for data parallelism, this library attempts to provide for stream parallelism: high quality pythonic tooling for supporting simple, fast, pure-python parallel stream processing.
+What Python's `multiprocessing.Pool` provides for data parallelism, this library attempts to provide for stream parallelism: high quality pythonic tooling for supporting simple, fast, pure-python parallel stream processing, with robust, pythonic error handling.
 
-This tooling keeps users in control of process state so this tooling remains simple, light-weight and robust while scaling to the complexities of modern hardware (GPU managment, high CPU counts, network-driven workflows, etc) and modern stream-processing workflows (deep learning inference and computational biology/chemistry).
+This unopinionated tooling allows users to keep control of process state so this tooling remains simple, light-weight and robust while efficiently scaling to the complexities of modern hardware (GPU management, high CPU counts, persistent database connections, etc) and modern stream-processing workflows (deep learning inference and computational biology/chemistry). It works best for fairly consistent and linear data pipelines seen in production workflows, and is expected to be less useful for more complex multi-source pipelines in ML training or scientific development.
 
-The framework utilizes best-of-class practices in python multiprocessing with an ambition to drive multiprocessing bugs to zero. Heavy-load testing is used to try to detect parallelism bugs with brute force, and detected bugs are not simply "patched" they are left open until solved theoretically and tested heavily. Users are encouraged to not use any concurrency primitives, and instead rely on the iterator pattern in the framework.
+The framework utilizes best-of-class practices in python multiprocessing with an ambition to drive multiprocessing bugs to zero. Heavy-load testing is used to try to detect parallelism bugs with brute force, and detected bugs are not simply "patched" they are left open until solved theoretically and tested heavily. Users are encouraged to not use any concurrency primitives, and instead rely on the iterator pattern in the framework, however, there is nothing preventing users from nesting in their own parallelism tooling.
 
 ## Usage
+
+### Pythonic stream processor
+
+Each main component of a pipeline is a function that looks like this:
+
+```python
+def stream(input_iter: Iterable[InputType], **kwargs)->Iterable[OutputType]:
+    # global setup
+    for input_element in input_iter:
+        # processing input
+        yield OutputType(...)
+        # can yield multiple outputs for each input, or zero
+        # outputs, the framework doesn't care
+        yield OutputType(...)
+```
 
 ### Example
 
