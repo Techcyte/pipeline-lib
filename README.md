@@ -115,7 +115,7 @@ def main():
 ### Step Requirements
 
 * Each pipeline step except the last one must be a python generator that uses the `yield` syntax.
-* Each pipeline step must generate pickleable data. If you have objects which are not pickeable by default, you can wrap them in an object and manually create `__setstate__` and `__getstate__` methods to serialize/deserialize your data.
+* Each pipeline step must generate data serialzable by the `cloudpickle` library, which includes all pickleable data and also most other pure-python constructs including lambdas. If you have objects which are not pickeable by default (sometimes data structures from C libraries do not have pickle support built-in), you can wrap them in an object and manually create `__setstate__` and `__getstate__` methods to serialize/deserialize your data.
 * To keep code quality high, each pipeline step must be type hinted (checked at runtime).
 
 ## Design
