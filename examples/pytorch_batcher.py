@@ -18,6 +18,7 @@ consistency with downstream steps. So you will
 get an error if it is untyped or incorrectly typed.
 """
 
+
 def run_model(
     img_data: Iterable[np.ndarray], model_source: str, model_name: str
 ) -> Iterable[np.ndarray]:
@@ -25,6 +26,7 @@ def run_model(
     for img in img_data:
         results = model(img)
         yield results
+
 
 def load_images(imgs: List[str]) -> Iterable[np.ndarray]:
     """
@@ -57,25 +59,29 @@ def run_model(
 
 
 def remap_results(
-    model_results: Iterable[np.ndarray], classmap: Dict[int, str]
+    model_results: Iterable[pandas.DataFrame], classmap: Dict[int, str]
 ) -> Iterable[Tuple[str, float]]:
     """
-    Post-processes neural network results
+    Post-processes neural network results. This example does something silly and
+    chooses the highest confidence single box in an object prediction task from the scene
     """
     for result in model_results:
-        result_class_idx = np.argmax(result)
-        result_confidence = result[result_class]
-        result_class = classmap[result_class_idx]
+        df = result[0]
+        result_class_idx = np.argmax(df["confidence"])
+        best_row = df.loc[result_class_idx]
+        result_confidence = best_row["confidence"].item()
+        result_class_id = best_row["class"].item()
+        result_class = classmap[result_class_id]
         yield (result_class, result_confidence)
 
 
-def aggregate_results(classes: Iterable[pandas.DataFrame]) -> None:
+def aggregate_results(classes: Iterable[Tuple[str, float]]) -> None:
     """
     Post-processing and reporting are combined in this step for simplicity.
     There could be multiple post-processing steps if you wish.
     """
     results = list(classes)
-    class_stats = Counter(name for result in results for res in result for name in res.loc[:,'name'])
+    class_stats = Counter(name for name, conf in results)
     print(class_stats)
 
 
