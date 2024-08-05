@@ -1,6 +1,6 @@
 ## Python Stream Parallelizer
 
-What Python's `multiprocessing.Pool` provides for data parallelism, this library attempts to provide for stream parallelism: high quality pythonic tooling for supporting simple, fast, pure-python parallel stream processing, with robust, pythonic error handling.
+What Python's `multiprocessing.Pool` provides for data parallelism, this micro-framework attempts to provide for stream parallelism: high quality pythonic tooling for supporting simple, fast, pure-python parallel stream processing, with robust, pythonic error handling.
 
 This unopinionated tooling allows users to keep control of process state so this tooling remains simple, light-weight and robust while efficiently scaling to the complexities of modern hardware (GPU management, high CPU counts, persistent database connections, etc) and modern stream-processing workflows (deep learning inference and computational biology/chemistry). It works best for fairly consistent and linear data pipelines seen in production workflows, and is expected to be less useful for more complex multi-source pipelines in ML training or scientific development.
 

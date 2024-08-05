@@ -13,8 +13,8 @@ from pipeline_executor import PipelineTask, execute
 """
 Each of these functions are valid pipeline steps.
 
-Note that the typings are checked at runtime for 
-consistency with downstream steps. So you will 
+Note that the typings are checked at runtime for
+consistency with downstream steps. So you will
 get an error if it is untyped or incorrectly typed.
 """
 
@@ -28,9 +28,9 @@ def run_model(
 
 def load_images(imgs: List[str]) -> Iterable[np.ndarray]:
     """
-    Load images in the image list into memory and yields them. 
-    
-    Note that as the first step in the pipeline, it does not need 
+    Load images in the image list into memory and yields them.
+
+    Note that as the first step in the pipeline, it does not need
     to accept an iterable, it can pull from a distributed queue,
     or a database, or anything else.
 
@@ -106,6 +106,15 @@ def main():
                     "model_source": "ultralytics/yolov5",
                 },
                 packets_in_flight=4,
+            ),
+            PipelineTask(
+                remap_results,
+                constants={
+                    "classmap": {
+                        0: "cat",
+                        1: "dog",
+                    }
+                },
             ),
             PipelineTask(aggregate_results),
         ]
