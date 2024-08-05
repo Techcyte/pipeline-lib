@@ -10,7 +10,7 @@ The framework utilizes best-of-class practices in python multiprocessing with an
 
 ### Pythonic stream processor
 
-Each main component of a pipeline is a function that looks like this:
+The central worker in a pipeline is a python generator (a function with a yeild statement inside) that looks like the below code snippet. If you are unfamilar with how python generators work, or how to write them (they are fairly rare in programming languages), you can see [these simple python docs](https://wiki.python.org/moin/Generators) for some concepts and examples.
 
 ```python
 def stream(input_iter: Iterable[InputType], **kwargs)->Iterable[OutputType]:
@@ -25,7 +25,7 @@ def stream(input_iter: Iterable[InputType], **kwargs)->Iterable[OutputType]:
 
 ### Example
 
-(see `examples/pytorch_batcher.py`) for the complete example.
+A complete, working example is below. The full code with more comments is in `examples/pytorch_batcher.py` in the repository.
 
 ```python
 # imports ...
@@ -197,9 +197,9 @@ num messages|message size|message type|sequential-thread|buffered-thread|paralle
 
 Two insights are:
 
-1. No matter which option is taken, message bandwidth is in the
-1. Multiprocessing has more overhead than threads, which have more overhead than sequential coroutines. But of course, the amount of possible parallelism is maximized for multiprocessing, limited for threads, and missing for coroutines.
-2. Shared memory communication (with fixed buffer sizes) is much faster than piped (infinite buffer size) communication, for both small metadata packets and larger numpy arrays.
+1. No matter which option is taken, message bandwidth/latency is far better when using a finite sized memory buffer configured with `max_message_size` than the unbounded message interface enabled by default.
+2. Multiprocessing has more overhead than threads, which have more overhead than sequential coroutines. But of course, the amount of possible parallelism is maximized for multiprocessing, limited for threads, and missing for coroutines.
+3. Shared memory communication (with fixed buffer sizes) is much faster than piped (infinite buffer size) communication, for both small metadata packets and larger numpy arrays.
 
 
 ## Neighboring projects
