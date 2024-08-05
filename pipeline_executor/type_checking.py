@@ -97,14 +97,17 @@ def type_check_tasks(tasks: List[PipelineTask]):
                 f"In task {task.name}, expected constants {other_args}, received constants {task_const_names}."
             )
 
-        _sanity_check_mp_params(task)
-
         prev_type = return_type
 
     if prev_type is not None:
         raise PipelineTypeError(
             f"In final task {tasks[-1].name}, expected output type None, actual type {prev_type}."
         )
+
+
+def sanity_check_mp_params(tasks: list[PipelineTask]):
+    for task in tasks:
+        _sanity_check_mp_params(task)
 
 
 def _sanity_check_mp_params(task: PipelineTask):

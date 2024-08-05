@@ -1,5 +1,7 @@
 from typing import List, Literal, Tuple, get_args
 
+from pipeline_executor.type_checking import sanity_check_mp_params, type_check_tasks
+
 from .mp_execution import execute_mp
 from .pipeline_task import PipelineTask
 from .seq_execution import execute_seq
@@ -14,17 +16,30 @@ PARALLELISM_STRATEGIES: Tuple[str, ...] = get_args(ParallelismStrategy)
 def execute(
     tasks: List[PipelineTask],
     parallelism: ParallelismStrategy = "thread",
+    type_check_pipeline: bool = True,
     inactivity_timeout: float | None = None,
 ):
     """
     execute tasks until final task completes.
-    Raises error if tasks are inconsistently specified or if
-    one of the tasks raises an error.
+    Raises exception if
+    one of the tasks raises an exception or crashes/segfaults in multiprocessing mode.
+
+    if `type_check_pipeline` is specified, then raises an exception
+    if tasks are inconsistently typed or untyped (similar to a harsh mypy analysis).
 
     Also raises an error if no message passing is observed in any task for
     at least `inactivity_timeout` seconds.
     (useful to kill any stuck jobs in a larger distributed system)
     """
+
+    if not tasks:
+        return
+
+    sanity_check_mp_params(tasks)
+
+    if type_check_pipeline:
+        type_check_tasks(tasks)
+
     if parallelism == "thread":
         assert (
             inactivity_timeout is None

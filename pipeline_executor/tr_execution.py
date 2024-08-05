@@ -6,7 +6,7 @@ from threading import Lock, Semaphore
 from typing import Any, Iterable, List
 
 from .pipeline_task import DEFAULT_BUF_SIZE, PipelineTask, TaskError
-from .type_checking import MAX_NUM_WORKERS, type_check_tasks
+from .type_checking import MAX_NUM_WORKERS, sanity_check_mp_params, type_check_tasks
 
 
 class PropogateErr(RuntimeError):
@@ -134,8 +134,7 @@ def execute_tr(tasks: List[PipelineTask]):
     if not tasks:
         return
 
-    type_check_tasks(tasks)
-
+    sanity_check_mp_params(tasks)
     _warn_parameter_overrides(tasks)
 
     if len(tasks) == 1:

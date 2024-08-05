@@ -4,7 +4,7 @@ import logging
 import multiprocessing as mp
 import multiprocessing.connection as mp_connection
 import os
-import pickle
+import cloudpickle
 import queue
 import select
 import signal
@@ -19,7 +19,7 @@ from operator import mul
 from typing import Any, Iterable, List, Literal, Optional, Tuple
 
 from .pipeline_task import InactivityError, PipelineTask, TaskError
-from .type_checking import MAX_NUM_WORKERS, type_check_tasks
+from .type_checking import MAX_NUM_WORKERS, sanity_check_mp_params, type_check_tasks
 
 logger = logging.getLogger(__name__)
 
@@ -186,9 +186,9 @@ class BufferedQueue(AsyncQueue):
     def put(self, item: Any):
         write_pos = self.entry_alloc.pop_write_pos()
         block_start = write_pos * self.buf_size
-        item_bytes = pickle.dumps(
+        item_bytes = cloudpickle.dumps(
             item,
-            protocol=pickle.HIGHEST_PROTOCOL,
+            protocol=cloudpickle.DEFAULT_PROTOCOL,
             buffer_callback=self.make_buffer_callback(write_pos),
         )
         # this needs to be inside lock, so unfortunately all pickling needs to be inside lock as well
@@ -213,7 +213,7 @@ class BufferedQueue(AsyncQueue):
         mem_view = memoryview(self._pickle_data).cast("b")
         data_bytes = mem_view[read_block : read_block + num_bytes]
 
-        loaded_data = pickle.loads(
+        loaded_data = cloudpickle.loads(
             data_bytes, buffers=self.iter_stored_buffers(read_pos)
         )
         return loaded_data, read_pos
@@ -331,7 +331,7 @@ class AsyncItemPassing:
         # copies all contents to byte array so that
         # furthur mutations of the data after this
         # returns does not change the result
-        self._put_thread_item[0] = pickle.dumps(item)
+        self._put_thread_item[0] = cloudpickle.dumps(item)
         self._put_thread_joinable.clear()
         self._put_thread_sent.set()
         self._put_thread_recived.wait()
@@ -581,7 +581,7 @@ def execute_mp(
     if not tasks:
         return
 
-    type_check_tasks(tasks)
+    sanity_check_mp_params(tasks)
 
     if len(tasks) == 1:
         (task,) = tasks
