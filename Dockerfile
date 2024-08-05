@@ -8,7 +8,7 @@ RUN rm get-pip.py
 RUN mkdir pypkg
 WORKDIR  /pypkg
 
-COPY pipeline_executor/ ./pipeline_executor
+COPY pipeline_lib/ ./pipeline_lib
 COPY scripts/ ./scripts
 COPY test/ ./test
 COPY pyproject.toml ./

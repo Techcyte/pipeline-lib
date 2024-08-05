@@ -1,4 +1,4 @@
-## Python Stream Parallelizer
+## pipeline_lib: A streaming pipeline accelerator for Python
 
 What Python's `multiprocessing.Pool` provides for data parallelism, this micro-framework attempts to provide for stream parallelism: high quality pythonic tooling for supporting simple, fast, pure-python parallel stream processing, with robust, pythonic error handling.
 
@@ -29,7 +29,7 @@ A complete, working example is below. The full code with more comments is in `ex
 
 ```python
 #...imports
-from pipeline_executor import PipelineTask, execute
+from pipeline_lib import PipelineTask, execute
 
 """
 Each of these functions are valid pipeline steps.
