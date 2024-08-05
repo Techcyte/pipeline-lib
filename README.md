@@ -238,6 +238,14 @@ Two insights are:
 3. Shared memory communication (with fixed buffer sizes) is much faster than piped (infinite buffer size) communication, for both small metadata packets and larger numpy arrays.
 
 
+## Development
+
+Package can be installed locally with `pip install -e .`
+
+Tests can be run with `pytest test`
+
+See CONTRIBUTIIONS.md for more information on what sorts of contibutions we are looking for.
+
 ## Neighboring projects
 
 ### Similar pipeline tooling
