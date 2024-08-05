@@ -19,7 +19,7 @@ from operator import mul
 from typing import Any, Iterable, List, Literal, Optional, Tuple
 
 from .pipeline_task import InactivityError, PipelineTask, TaskError
-from .type_checking import MAX_NUM_WORKERS, type_check_tasks
+from .type_checking import MAX_NUM_WORKERS, sanity_check_mp_params, type_check_tasks
 
 logger = logging.getLogger(__name__)
 
@@ -581,7 +581,7 @@ def execute_mp(
     if not tasks:
         return
 
-    type_check_tasks(tasks)
+    sanity_check_mp_params(tasks)
 
     if len(tasks) == 1:
         (task,) = tasks

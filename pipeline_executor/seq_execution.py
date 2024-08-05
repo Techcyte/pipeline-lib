@@ -32,8 +32,6 @@ def execute_seq(tasks: List[PipelineTask]):
     if not tasks:
         return
 
-    type_check_tasks(tasks)
-
     _warn_parameter_overrides(tasks)
 
     cur_result = tasks[0].generator(**tasks[0].constants_dict)
