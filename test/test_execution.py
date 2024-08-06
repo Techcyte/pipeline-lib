@@ -11,10 +11,10 @@ import numpy as np
 import psutil
 import pytest
 
-import pipeline_executor
-from pipeline_executor import PipelineTask, execute
-from pipeline_executor.execution import ParallelismStrategy
-from pipeline_executor.pipeline_task import InactivityError
+import pipeline_lib
+from pipeline_lib import PipelineTask, execute
+from pipeline_lib.execution import ParallelismStrategy
+from pipeline_lib.pipeline_task import InactivityError
 
 from .example_funcs import *
 
@@ -347,7 +347,7 @@ def test_single_worker_unexpected_exit(parallelism: ParallelismStrategy):
         ),
         PipelineTask(print_numbers, num_workers=2, packets_in_flight=2),
     ]
-    with raises_from(pipeline_executor.pipeline_task.TaskError):
+    with raises_from(pipeline_lib.pipeline_task.TaskError):
         execute(tasks, parallelism)
 
 

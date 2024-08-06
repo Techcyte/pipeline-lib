@@ -2,8 +2,8 @@ from typing import Dict, Optional, Union
 
 import pytest
 
-from pipeline_executor.pipeline_task import PipelineTask
-from pipeline_executor.type_checking import (
+from pipeline_lib.pipeline_task import PipelineTask
+from pipeline_lib.type_checking import (
     PipelineTypeError,
     get_func_args,
     is_iterable,
