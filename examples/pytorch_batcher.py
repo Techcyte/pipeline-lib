@@ -8,7 +8,7 @@ import torch
 from PIL import Image
 from torch import nn
 
-from pipeline_executor import PipelineTask, execute
+from pipeline_lib import PipelineTask, execute
 
 """
 Each of these functions are valid pipeline steps.

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 version = "0.2.0"
-name = "pipeline_executor"
-description = "A Stream execution engine for Python"
+name = "pipeline_lib"
+description = "A streaming pipeline accelerator for Python"
 readme = "README.md"
 requires-python = ">=3.8"
 classifiers = [
@@ -30,13 +30,13 @@ dev = [
 ]
 
 [tool.setuptools.package-data]
-pipeline_executor = [
+pipeline_lib = [
     "py.typed",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["pipeline_executor"]
+include = ["pipeline_lib"]
 exclude = ["*tests*"]
 
 [tool.black]

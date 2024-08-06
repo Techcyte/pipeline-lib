@@ -1,6 +1,6 @@
 from typing import List, Literal, Tuple, get_args
 
-from pipeline_executor.type_checking import sanity_check_mp_params, type_check_tasks
+from pipeline_lib.type_checking import sanity_check_mp_params, type_check_tasks
 
 from .mp_execution import execute_mp
 from .pipeline_task import PipelineTask

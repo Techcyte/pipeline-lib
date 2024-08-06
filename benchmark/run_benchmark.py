@@ -4,7 +4,7 @@ from typing import Any, Dict, Iterable, Literal
 
 import numpy as np
 
-from pipeline_executor import PARALLELISM_STRATEGIES, PipelineTask, execute
+from pipeline_lib import PARALLELISM_STRATEGIES, PipelineTask, execute
 
 N_MANY_MESSAGES = 50000
 N_BIG_MESSAGES = 100
