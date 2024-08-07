@@ -89,7 +89,9 @@ class CyclicAllocator:
         with self.position_lock:
             write_entry = int(self.consumer_last.value)
             self.consumer_idxs[write_entry] = written_pos
-            self.consumer_last.get_obj().value = (write_entry + 1) % self.max_num_elements
+            self.consumer_last.value = ctypes.c_int(
+                (write_entry + 1) % self.max_num_elements
+            )
 
     def pop_read_pos(self):
         with self.position_lock:
@@ -270,9 +272,9 @@ class BufferedQueue(AsyncQueue):
             out_of_band_size_view[cur_pos // 4] = src_len
 
             # set chunk data
-            out_of_band_view[
-                ALIGN_SIZE + cur_pos : ALIGN_SIZE + cur_pos + src_len
-            ] = src_obj
+            out_of_band_view[ALIGN_SIZE + cur_pos : ALIGN_SIZE + cur_pos + src_len] = (
+                src_obj
+            )
 
             block_position.value = next_pos
 
@@ -664,9 +666,9 @@ def execute_mp(
             while sentinel_set and not has_error:
                 done_sentinels = mp_connection.wait(
                     list(sentinel_set),
-                    timeout=None
-                    if inactivity_timeout is None
-                    else inactivity_timeout / 10,
+                    timeout=(
+                        None if inactivity_timeout is None else inactivity_timeout / 10
+                    ),
                 )
                 last_updated_time = max(
                     float(stream.last_updated_time.value) for stream in data_streams
