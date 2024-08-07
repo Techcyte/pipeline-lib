@@ -74,18 +74,6 @@ class TaskOutput:
             self.packets_space.release()
 
 
-def _start_source(
-    task: PipelineTask,
-    downstream: TaskOutput,
-):
-    try:
-        out_iter = task.generator(**task.constants_dict)
-        downstream.put_results(out_iter)
-    except BaseException as err:  # pylint: disable=broad-except
-        tb_str = traceback.format_exc()
-        downstream.set_error(task.name, err, tb_str)
-
-
 def _start_worker(
     task: PipelineTask,
     upstream: TaskOutput,
@@ -102,6 +90,18 @@ def _start_worker(
         # sets upstream and downstream so that error propogates throughout the system
         downstream.set_error(task.name, err, tb_str)
         upstream.set_error(task.name, err, tb_str)
+
+
+def _start_source(
+    task: PipelineTask,
+    downstream: TaskOutput,
+):
+    try:
+        out_iter = task.generator(**task.constants_dict)
+        downstream.put_results(out_iter)
+    except BaseException as err:  # pylint: disable=broad-except
+        tb_str = traceback.format_exc()
+        downstream.set_error(task.name, err, tb_str)
 
 
 def _start_sink(
