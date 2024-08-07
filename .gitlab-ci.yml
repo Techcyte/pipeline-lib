@@ -37,15 +37,15 @@ lint:
   stage: lint
   interruptible: true
   script:
-    - docker build . -t dataset_builder
-    - docker run --rm dataset_builder bash scripts/lint.sh
+    - docker build . -t pipeline_lib
+    - docker run --rm pipeline_lib bash scripts/lint.sh
 
 unit-test:
   stage: test
   interruptible: true
   script:
-    - docker build  . -t dataset_builder
-    - docker run --rm dataset_builder bash scripts/test.sh
+    - docker build  . -t pipeline_lib
+    - docker run --rm pipeline_lib bash scripts/test.sh
   needs: []
 
 publish-wheel:
@@ -53,7 +53,7 @@ publish-wheel:
   # uploads very quickly all at end, interrupts will generally be during build, and should be fine
   interruptible: true
   script:
-    - docker build . -t dataset_builder
-    - docker run --rm -e TWINE_PASSWORD=${CI_JOB_TOKEN} -e TWINE_USERNAME=gitlab-ci-token -e REPOSITORY_URL=${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi -t dataset_builder bash scripts/publish_package.sh
+    - docker build . -t pipeline_lib
+    - docker run --rm -e TWINE_PASSWORD=${CI_JOB_TOKEN} -e TWINE_USERNAME=gitlab-ci-token -e REPOSITORY_URL=${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi -t pipeline_lib bash scripts/publish_package.sh
   only:
     - main
