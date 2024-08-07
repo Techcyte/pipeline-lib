@@ -89,9 +89,7 @@ class CyclicAllocator:
         with self.position_lock:
             write_entry = int(self.consumer_last.value)
             self.consumer_idxs[write_entry] = written_pos
-            self.consumer_last.value = ctypes.c_int(
-                (write_entry + 1) % self.max_num_elements
-            )
+            self.consumer_last.value = (write_entry + 1) % self.max_num_elements  # type: ignore
 
     def pop_read_pos(self):
         with self.position_lock:
