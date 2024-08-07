@@ -10,10 +10,17 @@ import signal
 import threading as tr
 import time
 import traceback
+import typing
 from dataclasses import dataclass
 from functools import reduce
 from multiprocessing import synchronize
-from multiprocessing.context import BaseContext
+from multiprocessing.context import (
+    BaseContext,
+    ForkContext,
+    ForkProcess,
+    SpawnContext,
+    SpawnProcess,
+)
 from operator import mul
 from typing import Any, Iterable, List, Literal, Optional, Tuple
 
@@ -473,8 +480,8 @@ class TaskOutput:
             self.queue.flush(has_error=self.has_error)
             # normal end of iteration
             with self.num_tasks_remaining.get_lock():
-                self.num_tasks_remaining.value -= 1
-                if self.num_tasks_remaining.value == 0:
+                self.num_tasks_remaining.get_obj().value -= 1
+                if self.num_tasks_remaining.get_obj().value == 0:
                     for _i in range(MAX_NUM_WORKERS):
                         self.queue_len.release()
 
@@ -523,7 +530,7 @@ def _start_worker(
 
 
 @contextlib.contextmanager
-def sighandler(signum: int, processes: List[mp.Process]):
+def sighandler(signum: int, processes: List[ForkProcess | SpawnProcess]):
     def sigterm_handler(signum, frame):
         # propogate the signal to children processes
         for proc in processes:
@@ -589,7 +596,7 @@ def execute_mp(
         task.generator(**task.constants_dict)
         return
 
-    ctx = mp.get_context(spawn_method)
+    ctx = typing.cast(ForkContext | SpawnContext, mp.get_context(spawn_method))
 
     source_task = tasks[0]
     sink_task = tasks[-1]
@@ -610,7 +617,7 @@ def execute_mp(
         )
         for t in tasks[:-1]
     ]
-    processes: List[mp.Process] = [
+    processes: List[ForkProcess | SpawnProcess] = [
         ctx.Process(
             target=_start_source,
             args=(source_task, data_streams[0]),
@@ -670,6 +677,9 @@ def execute_mp(
 
                 sentinel_set -= set(done_sentinels)
                 for done_id in done_sentinels:
+                    assert isinstance(
+                        done_id, int
+                    ), f"mp_connection.wait returned unexpected type: {done_id}"
                     # for some reason needs a join, or the exitcode doesn't sync properly
                     # but it has already exited, so this should finish very quickly
                     sentinel_map[done_id].join()
