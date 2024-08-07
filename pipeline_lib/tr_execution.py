@@ -6,7 +6,7 @@ from threading import Lock, Semaphore
 from typing import Any, Iterable, List
 
 from .pipeline_task import DEFAULT_BUF_SIZE, PipelineTask, TaskError
-from .type_checking import MAX_NUM_WORKERS, sanity_check_mp_params, type_check_tasks
+from .type_checking import MAX_NUM_WORKERS, sanity_check_mp_params
 
 
 class PropogateErr(RuntimeError):

@@ -52,5 +52,5 @@ disable = [
     "missing-function-docstring", # TODO : REMOVE - TEMPORARY DURING INITIAL DEVELOPMENT
     "missing-module-docstring", # TODO : REMOVE - TEMPORARY DURING INITIAL DEVELOPMENT
     "missing-class-docstring", # TODO : REMOVE - TEMPORARY DURING INITIAL DEVELOPMENT
-    "fixme", # TODO : REMOVE - TEMPORARY DURING INITIAL DEVELOPMENT
+    "logging-fstring-interpolation",
 ]

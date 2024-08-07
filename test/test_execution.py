@@ -634,6 +634,6 @@ def test_zero_size_np_arrays(parallelism: bool):
 if __name__ == "__main__":
     # failed at:
     # :test_many_large_packets_correctness[4-16-process-spawn-1-10]
-    # test_many_large_packets_correctness("/tmp", 2, 4, "process-spawn")
+    test_many_large_packets_correctness("/tmp", 2, 4, False, "process-fork")
     # test_zero_size_np_arrays("process-spawn")
-    test_hang_message_passing_timeout("/tmp", BIG_MESSAGE_BYTES, "process-spawn")
+    # test_hang_message_passing_timeout("/tmp", BIG_MESSAGE_BYTES, "process-spawn")
