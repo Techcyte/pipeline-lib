@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-version = "0.2.0"
+version = "0.3.0"
 name = "pipeline_lib"
 description = "A streaming pipeline accelerator for Python"
 readme = "README.md"
@@ -49,8 +49,8 @@ profile = "black"
 [tool.pylint.messages_control]
 disable = [
     "line-too-long", # We use black to control this.
+    "logging-fstring-interpolation", # Logging in this repo is always fairly high severity, not an important rule
     "missing-function-docstring", # TODO : REMOVE - TEMPORARY DURING INITIAL DEVELOPMENT
     "missing-module-docstring", # TODO : REMOVE - TEMPORARY DURING INITIAL DEVELOPMENT
     "missing-class-docstring", # TODO : REMOVE - TEMPORARY DURING INITIAL DEVELOPMENT
-    "fixme", # TODO : REMOVE - TEMPORARY DURING INITIAL DEVELOPMENT
 ]

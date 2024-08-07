@@ -7,7 +7,6 @@ from .pipeline_task import (
     DEFAULT_PACKETS_IN_FLIGHT,
     PipelineTask,
 )
-from .type_checking import type_check_tasks
 
 
 def _warn_parameter_overrides(tasks: List[PipelineTask]):

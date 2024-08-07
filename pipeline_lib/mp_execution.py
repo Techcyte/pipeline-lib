@@ -4,22 +4,31 @@ import logging
 import multiprocessing as mp
 import multiprocessing.connection as mp_connection
 import os
-import cloudpickle
 import queue
 import select
 import signal
+import sys
 import threading as tr
 import time
 import traceback
+import typing
 from dataclasses import dataclass
 from functools import reduce
 from multiprocessing import synchronize
-from multiprocessing.context import BaseContext
+from multiprocessing.context import (
+    BaseContext,
+    ForkContext,
+    ForkProcess,
+    SpawnContext,
+    SpawnProcess,
+)
 from operator import mul
 from typing import Any, Iterable, List, Literal, Optional, Tuple
 
+import cloudpickle
+
 from .pipeline_task import InactivityError, PipelineTask, TaskError
-from .type_checking import MAX_NUM_WORKERS, sanity_check_mp_params, type_check_tasks
+from .type_checking import MAX_NUM_WORKERS, sanity_check_mp_params
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +62,7 @@ def roundup_to_align(size):
 
 
 class CyclicAllocator:
+    # pylint: disable=too-many-instance-attributes
     def __init__(self, max_num_elements: int, ctx: BaseContext) -> None:
         self.max_num_elements = max_num_elements
         self.producer_idxs = ctx.RawArray(ctypes.c_int, self.max_num_elements)
@@ -79,7 +89,7 @@ class CyclicAllocator:
         with self.position_lock:
             write_entry = int(self.consumer_last.value)
             self.consumer_idxs[write_entry] = written_pos
-            self.consumer_last.value = (write_entry + 1) % self.max_num_elements
+            self.consumer_last.value = (write_entry + 1) % self.max_num_elements  # type: ignore
 
     def pop_read_pos(self):
         with self.position_lock:
@@ -161,6 +171,8 @@ class BufferedQueue(AsyncQueue):
     commit 82e01b395e736e5c1cdaae7e1bd8a7dca3f78435 vs commit 89111ffea55063fd40f1894315b8c26673cbe6ce
     """
 
+    # pylint: disable=too-many-instance-attributes
+
     def __init__(
         self,
         buf_size: int,
@@ -171,13 +183,9 @@ class BufferedQueue(AsyncQueue):
         self.max_num_elements = max_num_elements
         self.orig_buf_size = buf_size
         # round buffer size up to align size so that every packets buffer starts as aligned
-        self.buf_size = roundup_to_align(buf_size)
-        # TODO: combine _pickle_data and _out_of_band_data into single buffer (probably by placing out of band starting from end?)
-        self._pickle_data = ctx.RawArray(
-            ctypes.c_byte, buf_size * self.max_num_elements
-        )
-        self._out_of_band_data = ctx.RawArray(
-            ctypes.c_byte, buf_size * self.max_num_elements
+        self.buf_size = buf_size = roundup_to_align(buf_size)
+        self._shared_mem_buf = ctx.RawArray(
+            ctypes.c_byte, self.buf_size * self.max_num_elements
         )
         self.buf_sizes = ctx.RawArray(ctypes.c_int, self.max_num_elements)
         self.entry_alloc = CyclicAllocator(max_num_elements, ctx)
@@ -185,23 +193,29 @@ class BufferedQueue(AsyncQueue):
 
     def put(self, item: Any):
         write_pos = self.entry_alloc.pop_write_pos()
+        # now we own the relevant buffers and can write to them
         block_start = write_pos * self.buf_size
+        mutable_block_position = Value(block_start)
         item_bytes = cloudpickle.dumps(
             item,
             protocol=cloudpickle.DEFAULT_PROTOCOL,
-            buffer_callback=self.make_buffer_callback(write_pos),
+            buffer_callback=self.make_buffer_callback(mutable_block_position),
         )
-        # this needs to be inside lock, so unfortunately all pickling needs to be inside lock as well
+        buffer_data_write_size = mutable_block_position.value - block_start
         self.buf_sizes[write_pos] = len(item_bytes)
 
-        if len(item_bytes) > self.buf_size:
+        # ensure that buffer procol data (starting from beginning of entry)
+        # and serialized pickle data (starting from end of entry) won't overlap and clobber each other
+        total_write_size = len(item_bytes) + buffer_data_write_size
+        if total_write_size > self.orig_buf_size:
             raise ValueError(
-                f"Tried to pass item of serialized size {len(item_bytes)}, but PipelineTask.max_message_size is {self.orig_buf_size}"
+                f"Tried to pass item of serialized size {total_write_size}, but PipelineTask.max_message_size is {self.orig_buf_size}"
             )
 
         pickled_view = memoryview(item_bytes).cast("b")
-        mem_view = memoryview(self._pickle_data).cast("b")
-        mem_view[block_start : block_start + len(item_bytes)] = pickled_view
+        mem_view = memoryview(self._shared_mem_buf).cast("b")
+        block_end = block_start + self.buf_size
+        mem_view[block_end - len(item_bytes) : block_end] = pickled_view
         # makes entry avaliable for reading
         self.entry_alloc.push_read_pos(write_pos)
 
@@ -209,9 +223,9 @@ class BufferedQueue(AsyncQueue):
         read_pos = self.entry_alloc.pop_read_pos()
         # no producers should be writing to this queue entry due to datastream semaphores
         num_bytes = int(self.buf_sizes[read_pos])
-        read_block = read_pos * self.buf_size
-        mem_view = memoryview(self._pickle_data).cast("b")
-        data_bytes = mem_view[read_block : read_block + num_bytes]
+        read_block_end = (read_pos + 1) * self.buf_size
+        mem_view = memoryview(self._shared_mem_buf).cast("b")
+        data_bytes = mem_view[read_block_end - num_bytes : read_block_end]
 
         loaded_data = cloudpickle.loads(
             data_bytes, buffers=self.iter_stored_buffers(read_pos)
@@ -222,19 +236,19 @@ class BufferedQueue(AsyncQueue):
         # frees up element for writing
         self.entry_alloc.push_write_pos(read_pos)
 
-    def make_buffer_callback(self, write_pos):
-        out_of_band_view = memoryview(self._out_of_band_data).cast("b")
-        out_of_band_size_view = memoryview(self._out_of_band_data).cast("b").cast("i")
+    def make_buffer_callback(self, block_position: Value):
+        out_of_band_view = memoryview(self._shared_mem_buf).cast("b")
+        out_of_band_size_view = memoryview(self._shared_mem_buf).cast("b").cast("i")
 
-        start_pos = write_pos * self.buf_size
+        start_pos = block_position.value
         # zero out starting marker
         out_of_band_size_view[start_pos // 4] = END_OF_BUFFER_ID
 
-        cur_block_pos = Value(start_pos)
-
         def format_buffer(buf_obj):
             mem_view = memoryview(buf_obj)
-            if any(dimsize == 0 for dimsize in mem_view.shape):
+            if mem_view.shape is None or any(
+                dimsize == 0 for dimsize in mem_view.shape  # pylint: disable=E1133
+            ):
                 # casting not allowed for zero size memory-views, create a new one instead
                 src_obj = memoryview(b"").cast("b")
             else:
@@ -242,13 +256,13 @@ class BufferedQueue(AsyncQueue):
                 obj_size = reduce(mul, src_obj.shape, 1)
                 src_obj = src_obj.cast("b", (obj_size,))
             src_len = len(src_obj)
-            cur_pos = cur_block_pos.value
+            cur_pos = block_position.value
             next_pos = cur_pos + roundup_to_align(ALIGN_SIZE + src_len)
             if next_pos - start_pos > self.buf_size:
                 raise ValueError(
                     f"Serialized numpy data coming out to size at least {next_pos - start_pos} in size, but PipelineTask.max_message_size is {self.orig_buf_size}"
                 )
-            elif next_pos - start_pos < self.buf_size:
+            if next_pos - start_pos < self.buf_size:
                 # mark current end of buffer by zeroing out size information
                 out_of_band_size_view[next_pos // 4] = END_OF_BUFFER_ID
 
@@ -256,17 +270,17 @@ class BufferedQueue(AsyncQueue):
             out_of_band_size_view[cur_pos // 4] = src_len
 
             # set chunk data
-            out_of_band_view[
-                ALIGN_SIZE + cur_pos : ALIGN_SIZE + cur_pos + src_len
-            ] = src_obj
+            out_of_band_view[ALIGN_SIZE + cur_pos : ALIGN_SIZE + cur_pos + src_len] = (
+                src_obj
+            )
 
-            cur_block_pos.value = next_pos
+            block_position.value = next_pos
 
         return format_buffer
 
     def iter_stored_buffers(self, read_pos):
-        out_of_band_view = memoryview(self._out_of_band_data).cast("b")
-        out_of_band_size_view = memoryview(self._out_of_band_data).cast("b").cast("i")
+        out_of_band_view = memoryview(self._shared_mem_buf).cast("b")
+        out_of_band_size_view = memoryview(self._shared_mem_buf).cast("b").cast("i")
         cur_pos = read_pos * self.buf_size
         end_pos = (read_pos + 1) * self.buf_size
         while cur_pos < end_pos:
@@ -400,8 +414,8 @@ class PipedQueue(AsyncQueue):
         self.entry_alloc.push_write_pos(read_pos)
 
     def flush(self, has_error: synchronize.Event):
-        for q in self.queues:
-            q.flush(has_error)
+        for queue_ in self.queues:
+            queue_.flush(has_error)
 
 
 class TaskOutput:
@@ -414,6 +428,7 @@ class TaskOutput:
         shared_buffer: bool,
         ctx: BaseContext,
     ) -> None:
+        # pylint: disable=too-many-arguments
         self.num_tasks_remaining = ctx.Value("i", num_upstream_tasks, lock=True)
         self.last_updated_time = ctx.Value("d", time.monotonic(), lock=False)
         self.queue_len = ctx.Semaphore(value=0)
@@ -472,8 +487,8 @@ class TaskOutput:
             self.queue.flush(has_error=self.has_error)
             # normal end of iteration
             with self.num_tasks_remaining.get_lock():
-                self.num_tasks_remaining.value -= 1
-                if self.num_tasks_remaining.value == 0:
+                self.num_tasks_remaining.get_obj().value -= 1
+                if self.num_tasks_remaining.get_obj().value == 0:
                     for _i in range(MAX_NUM_WORKERS):
                         self.queue_len.release()
 
@@ -499,7 +514,7 @@ def _start_source(
         downstream.set_error(task.name, err, tb_str)
         # exiting directly instead of re-raising error, as that would clutter stderr
         # with duplicate tracebacks
-        exit(PYTHON_ERR_EXIT_CODE)
+        sys.exit(PYTHON_ERR_EXIT_CODE)
 
 
 def _start_worker(
@@ -518,18 +533,18 @@ def _start_worker(
         upstream.set_error(task.name, err, tb_str)
         # exiting directly instead of re-raising error, as that would clutter stderr
         # with duplicate tracebacks
-        exit(PYTHON_ERR_EXIT_CODE)
+        sys.exit(PYTHON_ERR_EXIT_CODE)
 
 
 @contextlib.contextmanager
-def sighandler(signum: int, processes: List[mp.Process]):
-    def sigterm_handler(signum, frame):
+def sighandler(signum: int, processes: List[ForkProcess | SpawnProcess]):
+    def sigterm_handler(signum, _frame):
         # propogate the signal to children processes
         for proc in processes:
             # os.kill just sends a signal like the command line tool
             try:
                 os.kill(proc.ident, signum)
-            except ProcessLookupError as e:
+            except ProcessLookupError:
                 logger.warning(f"Failed to find process {proc.ident}")
         # throw an exception to trigger the exceptional cleanup policy
         raise SignalReceived(signum)
@@ -560,7 +575,7 @@ def _start_sink(
         upstream.set_error(task.name, err, tb_str)
         # exiting directly instead of re-raising error, as that would clutter stderr
         # with duplicate tracebacks
-        exit(PYTHON_ERR_EXIT_CODE)
+        sys.exit(PYTHON_ERR_EXIT_CODE)
 
 
 def execute_mp(
@@ -568,7 +583,7 @@ def execute_mp(
     spawn_method: SpawnContextName,
     inactivity_timeout: float | None = None,
 ):
-    # pylint: disable=too-many-branches,too-many-locals
+    # pylint: disable=too-many-branches,too-many-locals,too-many-statements
     """
     execute tasks until final task completes.
     Raises error if tasks are inconsistently specified or if
@@ -588,7 +603,7 @@ def execute_mp(
         task.generator(**task.constants_dict)
         return
 
-    ctx = mp.get_context(spawn_method)
+    ctx = typing.cast(ForkContext | SpawnContext, mp.get_context(spawn_method))
 
     source_task = tasks[0]
     sink_task = tasks[-1]
@@ -609,7 +624,7 @@ def execute_mp(
         )
         for t in tasks[:-1]
     ]
-    processes: List[mp.Process] = [
+    processes: List[ForkProcess | SpawnProcess] = [
         ctx.Process(
             target=_start_source,
             args=(source_task, data_streams[0]),
@@ -649,9 +664,9 @@ def execute_mp(
             while sentinel_set and not has_error:
                 done_sentinels = mp_connection.wait(
                     list(sentinel_set),
-                    timeout=None
-                    if inactivity_timeout is None
-                    else inactivity_timeout / 10,
+                    timeout=(
+                        None if inactivity_timeout is None else inactivity_timeout / 10
+                    ),
                 )
                 last_updated_time = max(
                     float(stream.last_updated_time.value) for stream in data_streams
@@ -669,6 +684,9 @@ def execute_mp(
 
                 sentinel_set -= set(done_sentinels)
                 for done_id in done_sentinels:
+                    assert isinstance(
+                        done_id, int
+                    ), f"mp_connection.wait returned unexpected type: {done_id}"
                     # for some reason needs a join, or the exitcode doesn't sync properly
                     # but it has already exited, so this should finish very quickly
                     sentinel_map[done_id].join()

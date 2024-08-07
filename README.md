@@ -222,7 +222,7 @@ There are also some sanity checks on the runtime values
 ## Benchmarks
 
 This gives a rough estimation of how much overhead each parallelism technique has for different workloads.
-It is produced by running `benchmark/run_benchmark.py`. Results below are on a native linux system on a desktop.
+It is produced by running `python -m benchmark.run_benchmark`. Results below are on a native linux system on a desktop.
 
 num messages|message size|message type|sequential-thread|buffered-thread|parallel-thread|sequential-process-fork|buffered-process-fork|parallel-process-fork|sequential-process-spawn|buffered-process-spawn|parallel-process-spawn|sequential-coroutine|buffered-coroutine|parallel-coroutine
 ---|---|---|---|---|---|---|---|---|---|---|---|---|---|---

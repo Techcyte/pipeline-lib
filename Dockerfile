@@ -11,7 +11,7 @@ WORKDIR  /pypkg
 COPY pipeline_lib/ ./pipeline_lib
 COPY scripts/ ./scripts
 COPY test/ ./test
-COPY pyproject.toml ./
+COPY pyproject.toml mypy.ini ./
 
 RUN pip install -e .[dev]
 
