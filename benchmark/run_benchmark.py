@@ -89,7 +89,7 @@ def benchmark_execution():
         ]
     ]
     num_messages = [N_MANY_MESSAGES, N_MANY_MESSAGES, N_BIG_MESSAGES, N_BIG_MESSAGES]
-    message_types: list[MessageType] = ["small","small","big","big"]
+    message_types: list[MessageType] = ["small", "small", "big", "big"]
     buffer_sizes = [
         BIG_MESSAGE_BYTES,
         None,

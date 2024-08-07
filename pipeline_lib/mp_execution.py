@@ -4,7 +4,6 @@ import logging
 import multiprocessing as mp
 import multiprocessing.connection as mp_connection
 import os
-import cloudpickle
 import queue
 import select
 import signal
@@ -17,6 +16,8 @@ from multiprocessing import synchronize
 from multiprocessing.context import BaseContext
 from operator import mul
 from typing import Any, Iterable, List, Literal, Optional, Tuple
+
+import cloudpickle
 
 from .pipeline_task import InactivityError, PipelineTask, TaskError
 from .type_checking import MAX_NUM_WORKERS, sanity_check_mp_params, type_check_tasks
