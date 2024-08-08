@@ -8,9 +8,9 @@ The framework utilizes best-of-class practices in python multiprocessing with an
 
 ## Usage
 
-### Pythonic stream processor
+### Defining a pipeline workers
 
-The central worker in a pipeline is a python generator (a function with a yeild statement inside) that looks like the below code snippet. If you are unfamilar with how python generators work, or how to write them (they are fairly rare in programming languages), you can see [these simple python docs](https://wiki.python.org/moin/Generators) for some concepts and examples.
+The central worker in a pipeline is a python generator (a function with a yeild statement inside) that takes as its first argument another python iterator. See the code snippet below for a simple example of what this can look like. If you are unfamilar with how python generators work, or how to write them (they are fairly rare in programming languages), you can see [these simple python docs](https://wiki.python.org/moin/Generators) for some concepts and examples.
 
 ```python
 def stream(input_iter: Iterable[InputType], **kwargs)->Iterable[OutputType]:
@@ -25,7 +25,7 @@ def stream(input_iter: Iterable[InputType], **kwargs)->Iterable[OutputType]:
 
 ### Example
 
-A complete, working example is below. The full code with more comments is in `examples/pytorch_batcher.py` in the repository.
+A complete example of accelerating deep learning inference with yolov5 is shown below. The full code with more comments is in `examples/pytorch_batcher.py` in the repository.
 
 ```python
 #...imports
