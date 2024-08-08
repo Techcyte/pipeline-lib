@@ -4,7 +4,7 @@ What Python's `multiprocessing.Pool` provides for data parallelism, this micro-f
 
 This unopinionated tooling allows users to keep control of process state so this tooling remains simple, light-weight and robust while efficiently scaling to the complexities of modern hardware (GPU management, high CPU counts, persistent database connections, etc) and modern stream-processing workflows (deep learning inference and computational biology/chemistry). It works best for fairly consistent and linear data pipelines seen in production workflows, and is expected to be less useful for more complex multi-source pipelines in ML training or scientific development.
 
-The framework utilizes best-of-class practices in python multiprocessing with an ambition to drive multiprocessing bugs to zero. Heavy-load testing is used to try to detect parallelism bugs with brute force, and detected bugs are not simply "patched" they are left open until solved theoretically and tested heavily. Users are encouraged to not use any concurrency primitives, and instead rely on the iterator pattern in the framework, however, there is nothing preventing users from nesting in their own parallelism tooling.
+The framework utilizes best-of-class practices in python multiprocessing with an ambition to drive multiprocessing bugs to zero. Heavy-load testing is used to try to detect parallelism bugs with brute force, and detected bugs are left open until solved and tested. Users are encouraged to rely on the framework as much as possible to minimize bugs and optimize performance; however, there is nothing preventing users from creating their own flow control using additional multiprocessing locks, thread pools, and other concurrency primitives.
 
 ## Usage
 
