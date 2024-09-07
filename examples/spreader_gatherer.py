@@ -1,20 +1,25 @@
+"""
+If you have import errors, run
+pip install sentence-transformers
+"""
 import bz2
 from dataclasses import dataclass
 import os
 import shutil
 import tempfile
-from typing import Iterator
+from typing import Iterable
 
 from xml.etree.ElementTree import XMLPullParser
 from pipeline_lib import PipelineTask, execute
 import urllib.request
 import zipfile
 import logging
+from sentence_transformers import SentenceTransformer, util
 
 logger = logging.Logger(__name__)
 
 
-def data_source(zip_file_links: list[str]) -> Iterator[str]:
+def data_source(zip_file_links: list[str]) -> Iterable[str]:
     for item in zip_file_links:
         yield item
 
@@ -25,7 +30,7 @@ class DownloadResult:
     chunk: bytes
 
 
-def downloader(zip_file_links: Iterator[str]) -> Iterator[DownloadResult]:
+def downloader(zip_file_links: Iterable[str]) -> Iterable[DownloadResult]:
     """
     Takes in links, downloads them to a temporary filename which is yielded
     """
@@ -43,7 +48,7 @@ class TextFileResults:
     extracted_bytes: bytes
 
 
-def unzipper(downloads: Iterator[DownloadResult]) -> Iterator[TextFileResults]:
+def unzipper(downloads: Iterable[DownloadResult]) -> Iterable[TextFileResults]:
     current_link = None
     current_decompressor = bz2.BZ2Decompressor()
     for download_chunk in downloads:
@@ -74,7 +79,7 @@ class FileSplitResult:
     article_contents: str
 
 
-def file_splitter(file_chunks: Iterator[TextFileResults]) -> Iterator[FileSplitResult]:
+def file_splitter(file_chunks: Iterable[TextFileResults]) -> Iterable[FileSplitResult]:
     current_link = None
     current_parser = XMLPullParser()
     current_title = ""
@@ -107,12 +112,32 @@ def file_splitter(file_chunks: Iterator[TextFileResults]) -> Iterator[FileSplitR
                 current_title = elem.text
 
 
-@dataclass
-class ArticleSemanticAnalysis:
-    link: str
-    article_title: str
-    analysis
+# @dataclass
+# class ArticleSemanticAnalysis:
+#     link: str
+#     article_title: str
+#     analysis
 
+def similarity_search(doc_iter: Iterable[FileSplitResult], query_str: str)->Iterable[FileSplitResult]:
+    model = SentenceTransformer('sentence-transformers/multi-qa-mpnet-base-dot-v1')
+
+    #Encode query and documents
+    query_emb = model.encode(query_str)
+    highest_score = -1e50
+    for doc_obj in doc_iter:
+        doc_emb = model.encode([doc_obj.article_contents])
+
+        #Compute dot score between query and all document embeddings
+        [score] = util.dot_score(query_emb, doc_emb)[0].cpu().tolist()
+        if score > highest_score:
+            print(f"New best document: score={score}, title='{doc_obj.article_title}'")
+            highest_score = score
+            yield doc_obj
+
+
+def collect_results(doc_iter: Iterable[FileSplitResult])->None:
+    for doc in doc_iter:
+        pass
 
 
 def main():
@@ -133,7 +158,38 @@ def main():
     full_links = [
         f"https://dumps.wikimedia.your.org/metawiki/20220820/{rem}" for rem in link_list
     ]
-    print(link_list)
+    query_str = input("Enter query string: ")
+    execute([
+        PipelineTask(
+            data_source,
+            constants={
+                "zip_file_links":full_links
+            },
+            packets_in_flight=4,
+        ),
+        PipelineTask(
+            downloader,
+            packets_in_flight=4,
+        ),
+        PipelineTask(
+            unzipper,
+            packets_in_flight=4,
+        ),
+        PipelineTask(
+            file_splitter,
+            packets_in_flight=4,
+        ),
+        PipelineTask(
+            similarity_search,
+            constants={
+                "query_str":query_str
+            },
+            packets_in_flight=4,
+        ),
+        PipelineTask(
+            collect_results,
+        ),
+    ])
 
 
 def test_downloader():
@@ -187,12 +243,25 @@ def test_file_splitter():
         ),
     ]
 
+def test_similarity_search():
+
+    query = "How many people live in London?"
+    docs = [
+        FileSplitResult(link="a",article_title="london_fin",article_contents="London is known for its financial district"),
+        FileSplitResult(link="a",article_title="london_pop",article_contents="Around 9 Million people live in London"),
+    ]
+
+    results = [*similarity_search(doc_iter=docs, query_str=query)]
+
+
+
 
 def test():
     test_downloader()
     test_unzipper()
     test_file_splitter()
+    test_similarity_search()
 
 
 if __name__ == "__main__":
-    test()
+    main()

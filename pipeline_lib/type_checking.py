@@ -55,7 +55,7 @@ def get_func_args(func, extract_first=True):
             is_iterable(base_return_type)
             and len(typing.get_args(base_return_type)) == 1
         ),
-        "Return type annotation must be an Iterable[input_type] or None",
+        f"Return type annotation must be an Iterable[input_type] or None, was {base_return_type}",
     )
 
     input_type = (
