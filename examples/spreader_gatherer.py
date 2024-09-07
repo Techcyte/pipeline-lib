@@ -34,11 +34,15 @@ def downloader(zip_file_links: Iterable[str]) -> Iterable[DownloadResult]:
     """
     Takes in links, downloads them to a temporary filename which is yielded
     """
+    CHUNK = 2**14
     for link in zip_file_links:
         # cleanup of this file will happen in the next pipeline step
         with urllib.request.urlopen(link) as download_pipe:
             # download_pipe
-            for chunk in download_pipe:
+            while True:
+                chunk = download_pipe.read(CHUNK)
+                if not chunk:
+                    break
                 yield DownloadResult(link=link, chunk=chunk)
 
 
@@ -49,27 +53,28 @@ class TextFileResults:
 
 
 def unzipper(downloads: Iterable[DownloadResult]) -> Iterable[TextFileResults]:
-    current_link = None
     current_decompressor = bz2.BZ2Decompressor()
     for download_chunk in downloads:
-        if current_link is None:
-            current_link = download_chunk.link
-            current_decompressor = bz2.BZ2Decompressor()
+        current_link = download_chunk.link
         if current_link != download_chunk.link:
             logger.error(
                 f"Didn't complete reading of bz2 file '{current_link}' before next link '{chunk.link}' hit\nContinuing despite error."
             )
             current_link = download_chunk.link
             current_decompressor = bz2.BZ2Decompressor()
-
         new_bytes = current_decompressor.decompress(download_chunk.chunk)
         yield TextFileResults(current_link, new_bytes)
-        if current_decompressor.eof:
-            current_link = None
-        if current_decompressor.unused_data:
-            logger.warn(
-                f"Unused data after end of bz2 file: {current_decompressor.unused_data}"
-            )
+        while current_decompressor.eof and current_decompressor.unused_data:
+            # logger.warn(
+            #     f"Unused data after end of bz2 file: {current_decompressor.unused_data}"
+            # )
+            used_data = current_decompressor.unused_data
+            current_decompressor = bz2.BZ2Decompressor()
+            new_bytes = current_decompressor.decompress(used_data)
+            # didn't make any progress decompressing, halting
+            if not new_bytes:
+                break
+            yield TextFileResults(current_link, new_bytes)
 
 
 @dataclass
@@ -94,10 +99,11 @@ def file_splitter(file_chunks: Iterable[TextFileResults]) -> Iterable[FileSplitR
             )
             current_link = chunk.link
             current_parser = XMLPullParser()
-
+        print(b"<page>" in chunk.extracted_bytes)
         current_parser.feed(chunk.extracted_bytes)
         for event, elem in current_parser.read_events():
             if elem.tag == "page":
+                print(elem)
                 if current_text or current_title:
                     yield FileSplitResult(
                         current_link,
@@ -223,10 +229,10 @@ def test_unzipper():
 
 def test_file_splitter():
     text_chunks = [
-        "<meta><page>\n",
-        "<dummy>123\n</dumm",
-        'y>\n<text inner_attribute="123">\nHere is some text',
-        "</text></page>\n<another_dummy></another_dummy><page>\n<text>Here is some more text on another page\n</text><title>My Page Title</title></page>\n</meta>",
+        b"<meta><page>\n",
+        b"<dummy>123\n</dumm",
+        b'y>\n<text inner_attribute="123">\nHere is some text',
+        b"</text></page>\n<another_dummy></another_dummy><page>\n<text>Here is some more text on another page\n</text><title>My Page Title</title></page>\n</meta>",
     ]
     chunk_inputs = [
         TextFileResults(link="data1", extracted_bytes=chunk) for chunk in text_chunks
@@ -242,6 +248,7 @@ def test_file_splitter():
             article_contents="Here is some more text on another page\n",
         ),
     ]
+
 
 def test_similarity_search():
 
@@ -264,4 +271,4 @@ def test():
 
 
 if __name__ == "__main__":
-    main()
+    test()
