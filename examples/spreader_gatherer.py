@@ -4,15 +4,12 @@ pip install sentence-transformers
 """
 import bz2
 from dataclasses import dataclass
-import os
-import shutil
 import tempfile
 from typing import Iterable
 
 from xml.etree.ElementTree import XMLPullParser
 from pipeline_lib import PipelineTask, execute
 import urllib.request
-import zipfile
 import logging
 from sentence_transformers import SentenceTransformer, util
 
@@ -99,11 +96,9 @@ def file_splitter(file_chunks: Iterable[TextFileResults]) -> Iterable[FileSplitR
             )
             current_link = chunk.link
             current_parser = XMLPullParser()
-        print(b"<page>" in chunk.extracted_bytes)
         current_parser.feed(chunk.extracted_bytes)
         for event, elem in current_parser.read_events():
-            if elem.tag == "page":
-                print(elem)
+            if elem.tag.endswith("page"):
                 if current_text or current_title:
                     yield FileSplitResult(
                         current_link,
@@ -112,20 +107,18 @@ def file_splitter(file_chunks: Iterable[TextFileResults]) -> Iterable[FileSplitR
                     )
                 current_text = ""
                 current_title = ""
-            if elem.tag == "text":
+            if elem.tag.endswith("text"):
                 current_text = elem.text
-            if elem.tag == "title":
+            if elem.tag.endswith("title"):
                 current_title = elem.text
 
 
-# @dataclass
-# class ArticleSemanticAnalysis:
-#     link: str
-#     article_title: str
-#     analysis
-
 def similarity_search(doc_iter: Iterable[FileSplitResult], query_str: str)->Iterable[FileSplitResult]:
     model = SentenceTransformer('sentence-transformers/multi-qa-mpnet-base-dot-v1')
+    try:
+        model.cuda()
+    except Exception as err:
+        print("Failed to use cuda GPU, using CPU as backup")
 
     #Encode query and documents
     query_emb = model.encode(query_str)
@@ -195,7 +188,8 @@ def main():
         PipelineTask(
             collect_results,
         ),
-    ])
+    ],
+    parallelism="process-fork")
 
 
 def test_downloader():
@@ -271,4 +265,4 @@ def test():
 
 
 if __name__ == "__main__":
-    test()
+    main()
