@@ -113,20 +113,22 @@ def file_splitter(file_chunks: Iterable[TextFileResults]) -> Iterable[FileSplitR
                 current_title = elem.text
 
 
-def similarity_search(doc_iter: Iterable[FileSplitResult], query_str: str)->Iterable[FileSplitResult]:
-    model = SentenceTransformer('sentence-transformers/multi-qa-mpnet-base-dot-v1')
+def similarity_search(
+    doc_iter: Iterable[FileSplitResult], query_str: str
+) -> Iterable[FileSplitResult]:
+    model = SentenceTransformer("sentence-transformers/multi-qa-mpnet-base-dot-v1")
     try:
         model.cuda()
     except Exception as err:
         print("Failed to use cuda GPU, using CPU as backup")
 
-    #Encode query and documents
+    # Encode query and documents
     query_emb = model.encode(query_str)
     highest_score = -1e50
     for doc_obj in doc_iter:
         doc_emb = model.encode([doc_obj.article_contents])
 
-        #Compute dot score between query and all document embeddings
+        # Compute dot score between query and all document embeddings
         [score] = util.dot_score(query_emb, doc_emb)[0].cpu().tolist()
         if score > highest_score:
             print(f"New best document: score={score}, title='{doc_obj.article_title}'")
@@ -134,7 +136,7 @@ def similarity_search(doc_iter: Iterable[FileSplitResult], query_str: str)->Iter
             yield doc_obj
 
 
-def collect_results(doc_iter: Iterable[FileSplitResult])->None:
+def collect_results(doc_iter: Iterable[FileSplitResult]) -> None:
     for doc in doc_iter:
         pass
 
@@ -158,38 +160,36 @@ def main():
         f"https://dumps.wikimedia.your.org/metawiki/20220820/{rem}" for rem in link_list
     ]
     query_str = input("Enter query string: ")
-    execute([
-        PipelineTask(
-            data_source,
-            constants={
-                "zip_file_links":full_links
-            },
-            packets_in_flight=4,
-        ),
-        PipelineTask(
-            downloader,
-            packets_in_flight=4,
-        ),
-        PipelineTask(
-            unzipper,
-            packets_in_flight=4,
-        ),
-        PipelineTask(
-            file_splitter,
-            packets_in_flight=4,
-        ),
-        PipelineTask(
-            similarity_search,
-            constants={
-                "query_str":query_str
-            },
-            packets_in_flight=4,
-        ),
-        PipelineTask(
-            collect_results,
-        ),
-    ],
-    parallelism="process-fork")
+    execute(
+        [
+            PipelineTask(
+                data_source,
+                constants={"zip_file_links": full_links},
+                packets_in_flight=4,
+            ),
+            PipelineTask(
+                downloader,
+                packets_in_flight=4,
+            ),
+            PipelineTask(
+                unzipper,
+                packets_in_flight=4,
+            ),
+            PipelineTask(
+                file_splitter,
+                packets_in_flight=4,
+            ),
+            PipelineTask(
+                similarity_search,
+                constants={"query_str": query_str},
+                packets_in_flight=4,
+            ),
+            PipelineTask(
+                collect_results,
+            ),
+        ],
+        parallelism="process-spawn",
+    )
 
 
 def test_downloader():
@@ -245,16 +245,21 @@ def test_file_splitter():
 
 
 def test_similarity_search():
-
     query = "How many people live in London?"
     docs = [
-        FileSplitResult(link="a",article_title="london_fin",article_contents="London is known for its financial district"),
-        FileSplitResult(link="a",article_title="london_pop",article_contents="Around 9 Million people live in London"),
+        FileSplitResult(
+            link="a",
+            article_title="london_fin",
+            article_contents="London is known for its financial district",
+        ),
+        FileSplitResult(
+            link="a",
+            article_title="london_pop",
+            article_contents="Around 9 Million people live in London",
+        ),
     ]
 
     results = [*similarity_search(doc_iter=docs, query_str=query)]
-
-
 
 
 def test():
