@@ -10,7 +10,7 @@ The framework utilizes best-of-class practices in python multiprocessing with an
 
 ### Defining a pipeline workers
 
-The central worker in a pipeline is a python generator (a function with a yeild statement inside) that takes as its first argument another python iterator. See the code snippet below for a simple example of what this can look like. If you are unfamilar with how python generators work, or how to write them (they are fairly rare in programming languages), you can see [these simple python docs](https://wiki.python.org/moin/Generators) for some concepts and examples.
+The central worker in a pipeline is a python generator (a function with a yield statement inside) that takes as its first argument another python iterator. See the code snippet below for a simple example of what this can look like. If you are unfamiliar with how python generators work, or how to write them (they are fairly rare in programming languages), you can see [these simple python docs](https://wiki.python.org/moin/Generators) for some concepts and examples.
 
 ```python
 def stream(input_iter: Iterable[InputType], **kwargs)->Iterable[OutputType]:
@@ -151,7 +151,7 @@ def main():
 ### Step Requirements
 
 * Each pipeline step except the last one must be a python generator that uses the `yield` syntax.
-* Each pipeline step must generate data serialzable by the `cloudpickle` library, which includes all pickleable data and also most other pure-python constructs including lambdas. If you have objects which are not pickeable by default (sometimes data structures from C libraries do not have pickle support built-in), you can wrap them in an object and manually create `__setstate__` and `__getstate__` methods to serialize/deserialize your data.
+* Each pipeline step must generate data serializable by the `cloudpickle` library, which includes all pickleable data and also most other pure-python constructs including lambdas. If you have objects which are not pickeable by default (sometimes data structures from C libraries do not have pickle support built-in), you can wrap them in an object and manually create `__setstate__` and `__getstate__` methods to serialize/deserialize your data.
 * To keep code quality high, each pipeline step must be type hinted (checked at runtime). This is enabled by default, to diable set `execute(...,type_check_pipeline=False)`
 
 ## Design
@@ -166,7 +166,7 @@ A Pipeline has three parts:
 
 The runtime execution model has a few key concepts:
 
-1. Max Packets in Flight: Max number of total packets being constructed or being consumed. A "packet" is assumped to be under construction whenever a producer or a consumer worker is running. So `packets_in_flight=1` means that the work on the data is completed fully synchronously. If the number of packets is greater than the number of workers, they are stored FIFO queue buffer. See [synchronous processing section below](#synchronous-processing) for more details.
+1. Max Packets in Flight: Max number of total packets being constructed or being consumed. A "packet" is assumed to be under construction whenever a producer or a consumer worker is running. So `packets_in_flight=1` means that the work on the data is completed fully synchronously. If the number of packets is greater than the number of workers, they are stored FIFO queue buffer. See [synchronous processing section below](#synchronous-processing) for more details.
 1. Workers: A worker is an independent thread of execution working in an instance of a generator. More than one worker can potentially lead to greater throughput, depending on the implementation.
 1. Buffer size (*multiprocessing only*): If `max_message_size` is set, then uses a shared memory scheme to pass data between producer and consumer very efficiently (see benchmark results below). **Warning**: If the actual pickled size of the data exceeds the specified size, then an error is raised, and there is no performance cost to the buffer being too large, so having large buffers is encouraged. If the `max_message_size` is not set, then it uses a pipe to communicate arbitrary amounts of data.
 
@@ -174,11 +174,11 @@ The runtime execution model has a few key concepts:
 
 A unique feature of the pipeline lib is *synchronous processing*, an odd feature in a parallel pipeline, but one designed to minimize total processing latency when needed.  This is particularly useful for distributed data processing systems where each worker is consuming from a shared pool of work, and should not reserve too much work for itself that it cannot process quickly.
 
-This tradeoff latency vs bandwidth of pipeline message processing is controlled by a single parameter `packets_in_flight`. From a consumer's perspective, the `packets_in_flight` is an ordinary queue buffer size. If there are avaliable packets that a producer has placed in the buffer, then the consumer can consume them. For example, see the following diagram, which is limited by producer capacity.
+This tradeoff latency vs bandwidth of pipeline message processing is controlled by a single parameter `packets_in_flight`. From a consumer's perspective, the `packets_in_flight` is an ordinary queue buffer size. If there are available packets that a producer has placed in the buffer, then the consumer can consume them. For example, see the following diagram, which is limited by producer capacity.
 
 ![producer bound system](docs/producer_bound.png)
 
-From the producer side, however, it is quite different than a queue, in that the system will not yield control back to the worker until there are empty slots avaliable to start producing. See diagram below of system which is limited by consumer capacity. The producers are blocking because all 7 slots are filled, with 5 messages stored in the buffer, waiting to be consumed, and 2 of which are being processed by consumers.
+From the producer side, however, it is quite different than a queue, in that the system will not yield control back to the worker until there are empty slots available to start producing. See diagram below of system which is limited by consumer capacity. The producers are blocking because all 7 slots are filled, with 5 messages stored in the buffer, waiting to be consumed, and 2 of which are being processed by consumers.
 
 ![consumer bound system](docs/consumer_bound.png)
 
@@ -187,12 +187,12 @@ Note the effect of having a series of tasks with `packets_in_flight=1` means tha
 ![sequential execution chain](docs/sequential_chain.png)
 
 
-The system enforces this by not yielding control back to the producer until there is a slot avaliable
+The system enforces this by not yielding control back to the producer until there is a slot available
 
 ```python
 def generator():
     ...
-    # will block until there is space avaliable
+    # will block until there is space available
     # to produce the next message
     yield message
     ...
@@ -206,7 +206,7 @@ The following rules for handling errors are tested.
 
 ### Type checking
 
-This library enforces strict type hint checking at pipeline build time through runtime type annotation introspection. So similarly to pydantic or cattrs, it will validate your pipeline based on whether the input of a processor (the first argument) in the pipeline matches the type of the output of the processor before it. Rules include:
+This library enforces strict type hint checking at pipeline build time through runtime type annotation introspection. So similarly to `pydantic` or `cattrs`, it will validate your pipeline based on whether the input of a processor (the first argument) in the pipeline matches the type of the output of the processor before it. Rules include:
 
 1. First argument of any processor or sink must be an `Iterable[<some_type>]` where that type matches the return type of the previous function
 1. Any source or processor function must return an `Iterable[<some_type>]`
@@ -250,10 +250,11 @@ See CONTRIBUTIIONS.md for more information on what sorts of contibutions we are 
 
 ### Similar pipeline tooling
 
-* YAPP: C++ stream processing library with simlar archtecture and concepts https://github.com/picanumber/yapp
+* YAPP: C++ stream processing library with similar architecture and concepts https://github.com/picanumber/yapp
 * Apache Beam: Multi-language framework for multi-step data processing that supports streams. https://beam.apache.org/documentation/sdks/python-streaming/
 * Huge list of pipeline projects of different levels of similarity: https://github.com/pditommaso/awesome-pipeline?tab=readme-ov-file#pipeline-frameworks--libraries
 
+<!--
 ### Downstream projects
 
-<!-- Complete this section when we have some downstream projects which actually use this -->
+ Complete this section when we have some downstream projects which actually use this -->
