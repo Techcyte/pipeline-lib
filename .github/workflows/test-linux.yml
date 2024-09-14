@@ -15,7 +15,7 @@ jobs:
         runs-on: ubuntu-latest
         strategy:
             matrix:
-                python-version: ['3.8'] 
+                python-version: ['3.8']
                 #, '3.9', '3.10', '3.11', '3.12']
         steps:
             - uses: actions/checkout@v4
@@ -26,6 +26,7 @@ jobs:
             - name: Install dependencies
               run: |
                   pip install -e .[dev]
+                  pip install pytest-xdist
             - name: Source distribution test
               run: |
                   python -m pip install --upgrade build
@@ -33,4 +34,4 @@ jobs:
                   pip install dist/*.tar.gz
             - name: Release Test
               run: |
-                  pytest test
+                  pytest -n 4 test
