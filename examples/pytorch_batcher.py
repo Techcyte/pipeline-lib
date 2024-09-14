@@ -3,10 +3,19 @@ from collections import Counter
 from typing import Dict, Iterable, List, Tuple
 
 import numpy as np
+import pandas
 import torch
 from PIL import Image
 
-from pipeline_executor import PipelineTask, execute
+from pipeline_lib import PipelineTask, execute
+
+"""
+Each of these functions are valid pipeline steps.
+
+Note that the typings are checked at runtime for
+consistency with downstream steps. So you will
+get an error if it is untyped or incorrectly typed.
+"""
 
 
 def run_model(
@@ -19,6 +28,16 @@ def run_model(
 
 
 def load_images(imgs: List[str]) -> Iterable[np.ndarray]:
+    """
+    Load images in the image list into memory and yields them.
+
+    Note that as the first step in the pipeline, it does not need
+    to accept an iterable, it can pull from a distributed queue,
+    or a database, or anything else.
+
+    Once parallelized in the pipeline-lib framework,
+    these images will be loaded in parallel with the model inference
+    """
     for img in imgs:
         with urllib.request.urlopen(img) as response:
             img_pil = Image.open(response, formats=["JPEG"])
@@ -26,22 +45,42 @@ def load_images(imgs: List[str]) -> Iterable[np.ndarray]:
             yield img_numpy
 
 
+def run_model(
+    img_data: Iterable[np.ndarray], model_source: str, model_name: str
+) -> Iterable[pandas.DataFrame]:
+    """
+    Run a model on every input from the img_data generator
+    """
+    model = torch.hub.load(model_source, model_name)
+    for img in img_data:
+        results = model(img).pandas().xyxy
+        yield results
+
+
 def remap_results(
-    model_results: Iterable[np.ndarray], classmap: Dict[int, str]
+    model_results: Iterable[pandas.DataFrame], classmap: Dict[int, str]
 ) -> Iterable[Tuple[str, float]]:
+    """
+    Post-processes neural network results. This example does something silly and
+    chooses the highest confidence single box in an object prediction task from the scene
+    """
     for result in model_results:
-        result_pd = result[0]
-        print(result_pd)
-        best_row_idx = np.argmax(result_pd.loc[:, "confidence"])
-        best_conf = result_pd.loc[best_row_idx, "class"]
-        result_model_idx = result_pd.loc[best_row_idx, "class"]
-        best_class = classmap[result_model_idx % (1 + max(classmap.keys()))]
-        yield (best_class, best_conf)
+        df = result[0]
+        result_class_idx = np.argmax(df["confidence"])
+        best_row = df.loc[result_class_idx]
+        result_confidence = best_row["confidence"].item()
+        result_class_id = best_row["class"].item()
+        result_class = classmap[result_class_id]
+        yield (result_class, result_confidence)
 
 
 def aggregate_results(classes: Iterable[Tuple[str, float]]) -> None:
+    """
+    Post-processing and reporting are combined in this step for simplicity.
+    There could be multiple post-processing steps if you wish.
+    """
     results = list(classes)
-    class_stats = Counter(clas for clas, conf in results)
+    class_stats = Counter(name for name, conf in results)
     print(class_stats)
 
 
@@ -51,6 +90,11 @@ def main():
         "https://ultralytics.com/images/zidane.jpg",
         "https://ultralytics.com/images/zidane.jpg",
     ]
+    # The system details of the pipeline (number of processes, max buffer size, etc)
+    # are defined in a list of simple PipelineTask objects, then executed.
+
+    # Note that in theory, this list of PipelineTask can be built dynamically,
+    # allowing for various sorts of encapsulation to be built around this library.
     execute(
         tasks=[
             PipelineTask(

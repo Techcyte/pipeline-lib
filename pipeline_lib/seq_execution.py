@@ -7,7 +7,6 @@ from .pipeline_task import (
     DEFAULT_PACKETS_IN_FLIGHT,
     PipelineTask,
 )
-from .type_checking import type_check_tasks
 
 
 def _warn_parameter_overrides(tasks: List[PipelineTask]):
@@ -31,8 +30,6 @@ def execute_seq(tasks: List[PipelineTask]):
     """
     if not tasks:
         return
-
-    type_check_tasks(tasks)
 
     _warn_parameter_overrides(tasks)
 

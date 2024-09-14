@@ -6,7 +6,7 @@ from threading import Lock, Semaphore
 from typing import Any, Iterable, List
 
 from .pipeline_task import DEFAULT_BUF_SIZE, PipelineTask, TaskError
-from .type_checking import MAX_NUM_WORKERS, type_check_tasks
+from .type_checking import MAX_NUM_WORKERS, sanity_check_mp_params
 
 
 class PropogateErr(RuntimeError):
@@ -74,18 +74,6 @@ class TaskOutput:
             self.packets_space.release()
 
 
-def _start_source(
-    task: PipelineTask,
-    downstream: TaskOutput,
-):
-    try:
-        out_iter = task.generator(**task.constants_dict)
-        downstream.put_results(out_iter)
-    except BaseException as err:  # pylint: disable=broad-except
-        tb_str = traceback.format_exc()
-        downstream.set_error(task.name, err, tb_str)
-
-
 def _start_worker(
     task: PipelineTask,
     upstream: TaskOutput,
@@ -102,6 +90,18 @@ def _start_worker(
         # sets upstream and downstream so that error propagates throughout the system
         downstream.set_error(task.name, err, tb_str)
         upstream.set_error(task.name, err, tb_str)
+
+
+def _start_source(
+    task: PipelineTask,
+    downstream: TaskOutput,
+):
+    try:
+        out_iter = task.generator(**task.constants_dict)
+        downstream.put_results(out_iter)
+    except BaseException as err:  # pylint: disable=broad-except
+        tb_str = traceback.format_exc()
+        downstream.set_error(task.name, err, tb_str)
 
 
 def _start_sink(
@@ -134,8 +134,7 @@ def execute_tr(tasks: List[PipelineTask]):
     if not tasks:
         return
 
-    type_check_tasks(tasks)
-
+    sanity_check_mp_params(tasks)
     _warn_parameter_overrides(tasks)
 
     if len(tasks) == 1:

@@ -11,9 +11,10 @@ import numpy as np
 import psutil
 import pytest
 
-import pipeline_executor
-from pipeline_executor import PipelineTask, execute
-from pipeline_executor.execution import ParallelismStrategy
+import pipeline_lib
+from pipeline_lib import PipelineTask, execute
+from pipeline_lib.execution import ParallelismStrategy
+from pipeline_lib.pipeline_task import InactivityError
 
 from .example_funcs import *
 
@@ -145,10 +146,10 @@ def test_sudden_exit_end(parallelism: ParallelismStrategy):
         execute(tasks, parallelism)
 
 
-def sleeper(vals: Iterable[int]) -> Iterable[int]:
+def sleeper(vals: Iterable[int], sleep_time: float) -> Iterable[int]:
     time.sleep(0.1)
     for i in vals:
-        time.sleep(0.01)
+        time.sleep(sleep_time)
         yield i
 
 
@@ -158,11 +159,11 @@ def test_sudden_exit_middle_sleepers(parallelism: ParallelismStrategy):
         PipelineTask(
             generate_numbers,
         ),
-        PipelineTask(sleeper),
+        PipelineTask(sleeper, constants={"sleep_time": 0.1}),
         PipelineTask(
             sudden_exit_fn,
         ),
-        PipelineTask(sleeper),
+        PipelineTask(sleeper, constants={"sleep_time": 0.1}),
         PipelineTask(
             print_numbers,
         ),
@@ -171,11 +172,60 @@ def test_sudden_exit_middle_sleepers(parallelism: ParallelismStrategy):
         execute(tasks, parallelism)
 
 
+def generate_numbers_short() -> Iterable[int]:
+    for i in range(9):
+        yield i
+
+
+@pytest.mark.parametrize("parallelism", ["process-fork", "process-spawn"])
+def test_inactivty_timeout(parallelism: ParallelismStrategy):
+    """
+    If we sleep for 1 second and have a task timeout of 0.1 seconds,
+    we should error due to the task timeout
+    """
+    tasks = [
+        PipelineTask(
+            generate_numbers_short,
+        ),
+        PipelineTask(sleeper, constants={"sleep_time": 1}),
+        PipelineTask(
+            print_numbers,
+        ),
+    ]
+    with raises_from(InactivityError):
+        execute(tasks, parallelism, inactivity_timeout=0.1)
+
+
+@pytest.mark.parametrize("parallelism", ["process-fork", "process-spawn"])
+def test_inactivity_timeout_missed(parallelism: ParallelismStrategy):
+    """
+    If we sleep for 0.1 second and have a task timeout of 1 seconds,
+    we should not error due to the task timeout
+    """
+    tasks = [
+        PipelineTask(
+            generate_numbers,
+        ),
+        PipelineTask(sleeper, constants={"sleep_time": 0.1}),
+        PipelineTask(
+            print_numbers,
+        ),
+    ]
+    # pipeline step should take about 10 seconds, 100 iters of 0.1 seconds each, so
+    # this catches that it is only inactivity
+    execute(tasks, parallelism, inactivity_timeout=1)
+
+
 @pytest.mark.parametrize("parallelism", all_parallelism_options)
 def test_full_contents_buffering(parallelism: ParallelismStrategy):
     tasks = [
         PipelineTask(generate_numbers, packets_in_flight=1000, max_message_size=1000),
-        PipelineTask(sleeper, packets_in_flight=1000, max_message_size=1000),
+        PipelineTask(
+            sleeper,
+            constants={"sleep_time": 0.1},
+            packets_in_flight=1000,
+            max_message_size=1000,
+        ),
         PipelineTask(
             print_numbers,
         ),
@@ -297,7 +347,7 @@ def test_single_worker_unexpected_exit(parallelism: ParallelismStrategy):
         ),
         PipelineTask(print_numbers, num_workers=2, packets_in_flight=2),
     ]
-    with raises_from(pipeline_executor.pipeline_task.TaskError):
+    with raises_from(pipeline_lib.pipeline_task.TaskError):
         execute(tasks, parallelism)
 
 
@@ -509,6 +559,53 @@ def test_many_large_packets_correctness(
     assert actual_result == expected_result
 
 
+def hang_message_passing() -> Iterable[Dict[str, Any]]:
+    for i in range(8):
+        val1 = np.arange(BIG_MESSAGE_SIZE, dtype="int32").reshape(100, -1) + i
+        yield {
+            "message_type": "big",
+            "message_1_contents": val1,
+            "val1_ref": val1,
+            "message_2_contents": (np.arange(500, dtype="int64") * i),
+        }
+    exit(0)
+
+
+# if it takes more than 10 seconds for a 5 second timeout to complete, something is wrong
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize("parallelism", ["process-fork", "process-spawn"])
+@pytest.mark.parametrize("max_message_size", [BIG_MESSAGE_BYTES, None])
+def test_hang_message_passing_timeout(
+    tmpdir,
+    max_message_size: bool,
+    parallelism: ParallelismStrategy,
+):
+    n_procs = 2
+    packets_in_flight = 4
+    tasks = [
+        PipelineTask(
+            hang_message_passing,
+            max_message_size=max_message_size,
+            packets_in_flight=packets_in_flight,
+        ),
+        PipelineTask(
+            process_message,
+            max_message_size=max_message_size,
+            packets_in_flight=packets_in_flight,
+            num_workers=n_procs,
+        ),
+        PipelineTask(
+            sum_arrays,
+            max_message_size=max_message_size,
+            packets_in_flight=packets_in_flight,
+            num_workers=n_procs,
+        ),
+        PipelineTask(save_results, constants=dict(tmpdir=tmpdir)),
+    ]
+    with raises_from(InactivityError):
+        execute(tasks, parallelism, inactivity_timeout=5)
+
+
 def generate_zero_siz_np_arrays() -> Iterable[np.ndarray]:
     for _ in range(10):
         val1 = np.zeros((7, 0, 4), dtype="int32")
@@ -537,6 +634,6 @@ def test_zero_size_np_arrays(parallelism: bool):
 if __name__ == "__main__":
     # failed at:
     # :test_many_large_packets_correctness[4-16-process-spawn-1-10]
-    # test_many_large_packets_correctness("/tmp", 2, 4, "process-spawn")
+    test_many_large_packets_correctness("/tmp", 2, 4, False, "process-fork")
     # test_zero_size_np_arrays("process-spawn")
-    test_main_process_sigterm("process-fork")
+    # test_hang_message_passing_timeout("/tmp", BIG_MESSAGE_BYTES, "process-spawn")
