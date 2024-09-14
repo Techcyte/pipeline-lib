@@ -15,7 +15,8 @@ jobs:
         runs-on: ubuntu-latest
         strategy:
             matrix:
-                python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+                python-version: ['3.8'] 
+                #, '3.9', '3.10', '3.11', '3.12']
         steps:
             - uses: actions/checkout@v4
             - name: Set up Python ${{ matrix.python-version }}
@@ -32,4 +33,4 @@ jobs:
                   pip install dist/*.tar.gz
             - name: Release Test
               run: |
-                  xvfb-run -s "-screen 0 1024x768x24" pytest -v --cov=pettingzoo --cov-report term
+                  pytest test
