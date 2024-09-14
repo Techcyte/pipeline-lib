@@ -27,6 +27,7 @@ jobs:
                   pip install -e .[dev]
             - name: Release Test
               run: |
+                  pip freeze
                   bash scripts/lint.sh
 
     linux-test:
