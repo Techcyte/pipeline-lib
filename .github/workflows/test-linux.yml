@@ -11,8 +11,28 @@ permissions:
     contents: read
 
 jobs:
+    lint:
+        runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                python-version: ['3.10']
+        steps:
+            - uses: actions/checkout@v4
+            - name: Set up Python ${{ matrix.python-version }}
+              uses: actions/setup-python@v4
+              with:
+                  python-version: ${{ matrix.python-version }}
+            - name: Install dependencies
+              run: |
+                  pip install -e .[dev]
+            - name: Release Test
+              run: |
+                  bash scripts/lint.sh
+
     linux-test:
         runs-on: ubuntu-latest
+        needs:
+            - lint
         strategy:
             matrix:
                 python-version: ['3.8']
@@ -32,6 +52,6 @@ jobs:
                   python -m pip install --upgrade build
                   python -m build --sdist
                   pip install dist/*.tar.gz
-            - name: Release Test
+            - name: Source build Test
               run: |
-                  pytest -n 4 test
+                  pytest --count=3 -n 4 test
