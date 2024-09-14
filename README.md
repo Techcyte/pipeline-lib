@@ -111,11 +111,11 @@ The runtime execution model has a few key concepts:
 
 A unique feature of the pipeline lib is *synchronous processing*, an odd feature in a parallel pipeline, but one designed to minimize the amount of total work being handled by a single executor. This is built for distributed data processing systems where each worker is consuming from a shared pool of work, and should not reserve too much work for itself that it cannot process quickly.
 
-This tradeoff between synchronous vs asynchronous control, in other words, the tradeoff between latency vs bandwidth of pipeline message processing is controlled by a single parameter `packets_in_flight`. From a consumer's perspective, the `packets_in_flight` is an ordinary queue buffer size. If there are avaliable packets that a producer has placed in the buffer, then the consumer can consume them. For example, see the following diagram, which is limited by producer capacity.
+This tradeoff between synchronous vs asynchronous control, in other words, the tradeoff between latency vs bandwidth of pipeline message processing is controlled by a single parameter `packets_in_flight`. From a consumer's perspective, the `packets_in_flight` is an ordinary queue buffer size. If there are available packets that a producer has placed in the buffer, then the consumer can consume them. For example, see the following diagram, which is limited by producer capacity.
 
 ![producer bound system](docs/producer_bound.png)
 
-From the producer side, however, it is quite different than a queue, in that the system will not yield control back to the worker until there are empty slots avaliable to start producing. See diagram below of system which is limited by consumer capacity. The producers are blocking because all 7 slots are filled, with 5 messages stored in the buffer, waiting to be consumed, and 2 of which are being processed by consumers.
+From the producer side, however, it is quite different than a queue, in that the system will not yield control back to the worker until there are empty slots available to start producing. See diagram below of system which is limited by consumer capacity. The producers are blocking because all 7 slots are filled, with 5 messages stored in the buffer, waiting to be consumed, and 2 of which are being processed by consumers.
 
 ![consumer bound system](docs/consumer_bound.png)
 
@@ -124,12 +124,12 @@ Note the effect of having a series of tasks with `packets_in_flight=1` means tha
 ![sequential execution chain](docs/sequential_chain.png)
 
 
-The system enforces this by not yielding control back to the producer until there is a slot avaliable
+The system enforces this by not yielding control back to the producer until there is a slot available
 
 ```python
 def generator():
     ...
-    # will block until there is space avaliable
+    # will block until there is space available
     # to produce the next message
     yield message
     ...

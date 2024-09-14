@@ -22,7 +22,7 @@ from .type_checking import MAX_NUM_WORKERS, type_check_tasks
 ERR_BUF_SIZE = 2**16
 # some arbitrary, hopefully unused number that signals python exiting after placing the error in the queue
 PYTHON_ERR_EXIT_CODE = 187
-# copies are much faster if they are aligned to 16 byte or 32 byte boundaries (depending on archtecture)
+# copies are much faster if they are aligned to 16 byte or 32 byte boundaries (depending on architecture)
 ALIGN_SIZE = 32
 
 SpawnContextName = Literal["spawn", "fork", "forkserver"]
@@ -54,7 +54,7 @@ class CyclicAllocator:
         self.producer_idxs = ctx.RawArray(ctypes.c_int, self.max_num_elements)
         self.producer_next = ctx.Value(ctypes.c_int, 0, lock=False)
         self.producer_last = ctx.Value(ctypes.c_int, 0, lock=False)
-        # initialize to putting everything avaliable
+        # initialize to putting everything available
         for i in range(self.max_num_elements):
             self.producer_idxs[i] = i
 
@@ -83,7 +83,7 @@ class CyclicAllocator:
             last_read_entry = int(self.consumer_last.value)
             # print(read_entry, last_read_entry)
             if read_entry == last_read_entry:
-                # no entry avaliable for reading, cannot continue
+                # no entry available for reading, cannot continue
                 raise queue.Empty()
             read_pos = self.consumer_idxs[read_entry]
             self.consumer_next.value = (read_entry + 1) % self.max_num_elements
@@ -110,7 +110,7 @@ class AsyncQueue:
     def put(self, _item: Any):
         """
         Puts item on queue. Undefined behavior if there are more items put
-        on the queue than the space avaliable.
+        on the queue than the space available.
 
         TODO: raise an error
         """
@@ -137,8 +137,8 @@ class BufferedQueue(AsyncQueue):
 
     Advantages over standard library multiprocessing.Queue:
 
-    1. Objects, once placed on the queue can be fetched immidiately without delay (mp.Queue `put` function returns immidiately after spawning the "sender" thread, so there can be a delay before the message is readable from the queue)
-    2. Even if producer process dies, the message is still avaliable to consume (only possible in ordinary queue if the message is placed fully in the mp.Pipe hardcoded 64kb buffer)
+    1. Objects, once placed on the queue can be fetched immediately without delay (mp.Queue `put` function returns immediately after spawning the "sender" thread, so there can be a delay before the message is readable from the queue)
+    2. Even if producer process dies, the message is still available to consume (only possible in ordinary queue if the message is placed fully in the mp.Pipe hardcoded 64kb buffer)
     3. No extra thread (on producer) is needed to send data to consumer
     4. Buffered communication between processes occurs fully asynchronously (vs back and forth queue message passing between spawned producer thread and consumer)
     5. One queue buffered read can process concurrently with one write
@@ -148,7 +148,7 @@ class BufferedQueue(AsyncQueue):
     1. Doesn't work well if messages can be arbitrarily large
     2. Requires significant number of file handles
 
-    Additionally, this library makes use of the pickly protocol v5's
+    Additionally, this library makes use of the pickle protocol v5's
     buffer interface in `make_buffer_callback` and `iter_stored_buffers` methods.
     This is to support fast copies of numpy arrays, and other buffers.
     It was chosen over the default pickle serialization method for performance.
@@ -198,12 +198,12 @@ class BufferedQueue(AsyncQueue):
         pickled_view = memoryview(item_bytes).cast("b")
         mem_view = memoryview(self._pickle_data).cast("b")
         mem_view[block_start : block_start + len(item_bytes)] = pickled_view
-        # makes entry avaliable for reading
+        # makes entry available for reading
         self.entry_alloc.push_read_pos(write_pos)
 
     def get(self):
         read_pos = self.entry_alloc.pop_read_pos()
-        # no producers should be writing to this queue entry due to datastream semaphores
+        # no producers should be writing to this queue entry due to datastream's semaphores
         num_bytes = int(self.buf_sizes[read_pos])
         read_block = read_pos * self.buf_size
         mem_view = memoryview(self._pickle_data).cast("b")
@@ -325,7 +325,7 @@ class AsyncItemPassing:
             self._set_write_end()
 
         # copies all contents to byte array so that
-        # furthur mutations of the data after this
+        # further mutations of the data after this
         # returns does not change the result
         self._put_thread_item[0] = pickle.dumps(item)
         self._put_thread_joinable.clear()
@@ -382,7 +382,7 @@ class PipedQueue(AsyncQueue):
         write_pos = self.entry_alloc.pop_write_pos()
         # this pipe is reserved, will only be read by a single reader
         self.queues[write_pos].put(item)
-        # makes entry avaliable for reading
+        # makes entry available for reading
         self.entry_alloc.push_read_pos(write_pos)
 
     def get(self):
@@ -432,7 +432,7 @@ class TaskOutput:
             try:
                 item, read_pos = self.queue.get()
             except queue.Empty:
-                # only occurs if error occured or no more producers left
+                # only occurs if error occurred or no more producers left
                 break
 
             yield item
@@ -448,7 +448,7 @@ class TaskOutput:
         iterator = iter(iterable)
         try:
             while True:
-                # wait for space to be avaliable on queue before iterating to next item
+                # wait for space to be available on queue before iterating to next item
                 # essential for full synchronization semantics with packets_in_flight=1
                 self.packets_space.acquire()  # pylint: disable=consider-using-with
 
@@ -505,7 +505,7 @@ def _start_worker(
         downstream.put_results(out_iter)
     except Exception as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
-        # sets upstream and downstream so that error propogates throughout the system
+        # sets upstream and downstream so that error propagates throughout the system
         downstream.set_error(task.name, err, tb_str)
         upstream.set_error(task.name, err, tb_str)
         # exiting directly instead of re-raising error, as that would clutter stderr
@@ -576,7 +576,7 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
     worker_tasks = tasks[1:-1]
 
     n_total_tasks = sum(task.num_workers for task in tasks)
-    # use a bufferedqueue because it synchronizes instantly, unlike PipedQueue or mp.queue
+    # use a BufferedQueue because it synchronizes instantly, unlike PipedQueue or mp.queue
     err_queue = BufferedQueue(ERR_BUF_SIZE, n_total_tasks + 2, False, ctx)
     # number of processes are of the producing task
     data_streams = [
@@ -667,7 +667,7 @@ def execute_mp(tasks: List[PipelineTask], spawn_method: SpawnContextName):
             # escalate, send sigterm to processes
             for proc in processes:
                 proc.terminate()
-            # wait for terminate signal to propogate through the processes
+            # wait for terminate signal to propagate through the processes
             for proc in processes:
                 proc.join(timeout=5.0)
             # force kill the processes (only if they are refusing to terminate cleanly)

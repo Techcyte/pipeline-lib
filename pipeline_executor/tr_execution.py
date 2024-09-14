@@ -42,7 +42,7 @@ class TaskOutput:
         iterator = iter(iterable)
         try:
             while True:
-                # wait for space to be avaliable on queue before iterating to next item
+                # wait for space to be available on queue before iterating to next item
                 # essential for full synchronization semantics with packets_in_flight=1
                 self.packets_space.acquire()  # pylint: disable=consider-using-with
 
@@ -99,7 +99,7 @@ def _start_worker(
 
     except BaseException as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
-        # sets upstream and downstream so that error propogates throughout the system
+        # sets upstream and downstream so that error propagates throughout the system
         downstream.set_error(task.name, err, tb_str)
         upstream.set_error(task.name, err, tb_str)
 

@@ -27,7 +27,7 @@ class PipelineTask:
     # a shared buffer without copying. This is valid if the downstream pipeline step
     # deletes all references to all the data it receives from the previous iteration
     # of the iterable
-    # default is to copy this buffer to guarentee no data races
+    # default is to copy this buffer to guarantee no data races
     shared_buffer: bool = False
 
     @property
@@ -40,6 +40,4 @@ class PipelineTask:
 
 
 class TaskError(RuntimeError):
-    """Error for miscelanious, unidentifiable issues that come up during task execution"""
-
-    pass
+    """Error for miscellaneous, unidentifiable issues that come up during task execution"""

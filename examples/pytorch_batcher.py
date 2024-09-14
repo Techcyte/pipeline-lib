@@ -32,10 +32,10 @@ def remap_results(
     for result in model_results:
         result_pd = result[0]
         print(result_pd)
-        best_row_idx = np.argmax(result_pd.loc[:,'confidence'])
-        best_conf = result_pd.loc[best_row_idx,'class']
-        result_model_idx = result_pd.loc[best_row_idx,'class']
-        best_class = classmap[result_model_idx % (1+max(classmap.keys()))]
+        best_row_idx = np.argmax(result_pd.loc[:, "confidence"])
+        best_conf = result_pd.loc[best_row_idx, "class"]
+        result_model_idx = result_pd.loc[best_row_idx, "class"]
+        best_class = classmap[result_model_idx % (1 + max(classmap.keys()))]
         yield (best_class, best_conf)
 
 
@@ -82,7 +82,7 @@ def main():
         # if you have any sort of pickling error, you can try using the
         # thread backend instead
         # parallelism="thread"
-        parallelism="process-fork"
+        parallelism="process-fork",
     )
 
 
