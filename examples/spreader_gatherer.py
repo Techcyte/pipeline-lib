@@ -3,15 +3,16 @@ If you have import errors, run
 pip install sentence-transformers
 """
 import bz2
-from dataclasses import dataclass
-import tempfile
-from typing import Iterable
-
-from xml.etree.ElementTree import XMLPullParser
-from pipeline_lib import PipelineTask, execute
-import urllib.request
 import logging
+import tempfile
+import urllib.request
+from dataclasses import dataclass
+from typing import Iterable
+from xml.etree.ElementTree import XMLPullParser
+
 from sentence_transformers import SentenceTransformer, util
+
+from pipeline_lib import PipelineTask, execute
 
 logger = logging.Logger(__name__)
 
