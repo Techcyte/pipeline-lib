@@ -270,9 +270,9 @@ class BufferedQueue(AsyncQueue):
             out_of_band_size_view[cur_pos // 4] = src_len
 
             # set chunk data
-            out_of_band_view[
-                ALIGN_SIZE + cur_pos : ALIGN_SIZE + cur_pos + src_len
-            ] = src_obj
+            out_of_band_view[ALIGN_SIZE + cur_pos : ALIGN_SIZE + cur_pos + src_len] = (
+                src_obj
+            )
 
             block_position.value = next_pos
 

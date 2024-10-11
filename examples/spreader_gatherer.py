@@ -2,6 +2,7 @@
 If you have import errors, run
 pip install sentence-transformers
 """
+
 import bz2
 import logging
 import tempfile
