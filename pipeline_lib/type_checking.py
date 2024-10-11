@@ -105,7 +105,7 @@ def type_check_tasks(tasks: List[PipelineTask]):
         )
 
 
-def sanity_check_mp_params(tasks: list[PipelineTask]):
+def sanity_check_mp_params(tasks: List[PipelineTask]):
     for task in tasks:
         _sanity_check_mp_params(task)
 

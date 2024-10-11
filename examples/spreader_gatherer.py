@@ -18,7 +18,7 @@ from pipeline_lib import PipelineTask, execute
 logger = logging.Logger(__name__)
 
 
-def data_source(zip_file_links: list[str]) -> Iterable[str]:
+def data_source(zip_file_links: List[str]) -> Iterable[str]:
     for item in zip_file_links:
         yield item
 
