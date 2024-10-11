@@ -1,4 +1,4 @@
-from typing import List, Literal, Tuple, get_args
+from typing import List, Literal, Optional, Tuple, get_args
 
 from pipeline_lib.type_checking import sanity_check_mp_params, type_check_tasks
 
@@ -17,7 +17,7 @@ def execute(
     tasks: List[PipelineTask],
     parallelism: ParallelismStrategy = "thread",
     type_check_pipeline: bool = True,
-    inactivity_timeout: float | None = None,
+    inactivity_timeout: Optional[float] = None,
 ):
     """
     execute tasks until final task completes.

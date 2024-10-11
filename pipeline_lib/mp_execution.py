@@ -23,7 +23,7 @@ from multiprocessing.context import (
     SpawnProcess,
 )
 from operator import mul
-from typing import Any, Iterable, List, Literal, Optional, Tuple
+from typing import Any, Iterable, List, Literal, Optional, Tuple, Union
 
 import cloudpickle
 
@@ -538,7 +538,7 @@ def _start_worker(
 
 
 @contextlib.contextmanager
-def sighandler(signum: int, processes: List[ForkProcess | SpawnProcess]):
+def sighandler(signum: int, processes: List[Union[ForkProcess, SpawnProcess]]):
     def sigterm_handler(signum, _frame):
         # propogate the signal to children processes
         for proc in processes:
@@ -582,7 +582,7 @@ def _start_sink(
 def execute_mp(
     tasks: List[PipelineTask],
     spawn_method: SpawnContextName,
-    inactivity_timeout: float | None = None,
+    inactivity_timeout: Optional[float] = None,
 ):
     # pylint: disable=too-many-branches,too-many-locals,too-many-statements
     """
@@ -604,7 +604,7 @@ def execute_mp(
         task.generator(**task.constants_dict)
         return
 
-    ctx = typing.cast(ForkContext | SpawnContext, mp.get_context(spawn_method))
+    ctx = typing.cast(Union[ForkContext, SpawnContext], mp.get_context(spawn_method))
 
     source_task = tasks[0]
     sink_task = tasks[-1]
@@ -625,7 +625,7 @@ def execute_mp(
         )
         for t in tasks[:-1]
     ]
-    processes: List[ForkProcess | SpawnProcess] = [
+    processes: List[Union[ForkProcess, SpawnProcess]] = [
         ctx.Process(
             target=_start_source,
             args=(source_task, data_streams[0]),

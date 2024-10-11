@@ -1,6 +1,6 @@
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Literal
+from typing import Any, Dict, Iterable, Literal, Optional
 
 import numpy as np
 
@@ -45,7 +45,7 @@ def run_messages(
     parallelism_type: str,
     num_messages: int,
     message_type: MessageType,
-    max_message_size: int | None,
+    max_message_size: Optional[int],
 ):
     execute(
         [
