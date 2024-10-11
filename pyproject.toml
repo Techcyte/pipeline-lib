@@ -19,7 +19,7 @@ dev = [
     "numpy",
     "pytest",
     "pytest-repeat",
-    "black",
+    "black==24.10.0",
     "pylint",
     "isort",
     "mypy",

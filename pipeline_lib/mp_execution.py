@@ -421,6 +421,7 @@ class PipedQueue(AsyncQueue):
 class TaskOutput:
     def __init__(
         self,
+        *,
         num_upstream_tasks: int,
         packets_in_flight: int,
         error_info: BufferedQueue,
@@ -615,9 +616,9 @@ def execute_mp(
     # number of processes are of the producing task
     data_streams = [
         TaskOutput(
-            t.num_workers,
-            t.packets_in_flight,
-            err_queue,
+            num_upstream_tasks=t.num_workers,
+            packets_in_flight=t.packets_in_flight,
+            error_info=err_queue,
             max_message_size=t.max_message_size,
             shared_buffer=t.shared_buffer,
             ctx=ctx,
