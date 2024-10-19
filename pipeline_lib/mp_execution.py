@@ -419,6 +419,7 @@ class PipedQueue(AsyncQueue):
 
 
 class TaskOutput:
+    # pylint: disable=too-many-instance-attributes
     def __init__(
         self,
         *,
