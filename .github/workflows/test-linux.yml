@@ -54,4 +54,4 @@ jobs:
                   pip install dist/*.tar.gz
             - name: Source build Test
               run: |
-                  pytest -n 4 test
+                  pytest test
