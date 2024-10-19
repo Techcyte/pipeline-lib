@@ -332,7 +332,12 @@ def test_single_worker_unexpected_exit(parallelism: ParallelismStrategy):
     if one process dies and the others do not, then it should still raise an exception,
     as the dead process might have consumed an important message
     """
-    started_event = mp.Event()
+    started_event_context = (
+        mp.get_context("fork")
+        if parallelism == "process-fork"
+        else mp.get_context("spawn")
+    )
+    started_event = started_event_context.Event()
     tasks = [
         PipelineTask(
             generate_infinite,

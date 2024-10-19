@@ -54,4 +54,4 @@ jobs:
                   pip install dist/*.tar.gz
             - name: Source build Test
               run: |
-                  pytest test
+                  pytest -n 4 test  # github has 4 threads per worker as of 2024
