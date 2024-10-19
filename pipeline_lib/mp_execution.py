@@ -430,7 +430,8 @@ class TaskOutput:
         ctx: BaseContext,
     ) -> None:
         # pylint: disable=too-many-arguments
-        self.num_tasks_remaining = ctx.Value("i", num_upstream_tasks, lock=True)
+        self.num_tasks_remaining = ctx.Value("i", num_upstream_tasks, lock=False)
+        self.num_tasks_remaining_lock = ctx.Lock()
         self.last_updated_time = ctx.Value("d", time.monotonic(), lock=False)
         self.queue_len = ctx.Semaphore(value=0)
         self.packets_space = ctx.Semaphore(value=packets_in_flight)
@@ -487,7 +488,7 @@ class TaskOutput:
             # flush and clean up up queue resources since it is done putting
             self.queue.flush(has_error=self.has_error)
             # normal end of iteration
-            with self.num_tasks_remaining.get_lock():
+            with self.num_tasks_remaining_lock:
                 self.num_tasks_remaining.get_obj().value -= 1
                 if self.num_tasks_remaining.get_obj().value == 0:
                     for _i in range(MAX_NUM_WORKERS):
