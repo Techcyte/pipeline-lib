@@ -4,9 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 version = "0.3.0"
-name = "pipeline_lib"
+name = "pipeline-lib"
 description = "A streaming pipeline accelerator for Python"
 readme = "README.md"
+# make sure that all supported python versions are tested in
+# .github/workflows/test-linux.yml
 requires-python = ">=3.8"
 classifiers = [
     "Programming Language :: Python :: 3",
