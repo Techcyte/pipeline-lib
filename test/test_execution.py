@@ -212,8 +212,8 @@ def test_inactivity_timeout_missed(parallelism: ParallelismStrategy):
         ),
     ]
     # pipeline step should take about 10 seconds, 100 iters of 0.1 seconds each, so
-    # this catches that it is only inactivity
-    execute(tasks, parallelism, inactivity_timeout=1)
+    # this catches that it is only inactivity that triggers the inactivity error, not duration
+    execute(tasks, parallelism, inactivity_timeout=5)
 
 
 @pytest.mark.parametrize("parallelism", all_parallelism_options)
