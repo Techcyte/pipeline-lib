@@ -244,7 +244,7 @@ Package can be installed locally with `pip install -e .`
 
 Tests can be run with `pytest test`
 
-See CONTRIBUTIIONS.md for more information on what sorts of contibutions we are looking for.
+See [CONTRIBUTIONS.md](/CONTRIBUTIONS.md) for more information on what sorts of contibutions we are looking for.
 
 ## Neighboring projects
 
