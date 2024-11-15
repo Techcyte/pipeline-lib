@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+version = "0.3.3"
+name = "pipeline-lib"
+description = "A streaming pipeline accelerator for Python"
+readme = "README.md"
+# make sure that all supported python versions are tested in
+# .github/workflows/test-linux.yml
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "cloudpickle"
+]
+[project.optional-dependencies]
+dev = [
+    "numpy",
+    "pytest",
+    "pytest-repeat",
+    "black",
+    "pylint",
+    "isort",
+    "mypy",
+    "colorama",
+    "build",
+    "twine",
+    "psutil",
+]
+
+[tool.setuptools.package-data]
+pipeline_lib = [
+    "py.typed",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pipeline_lib"]
+exclude = ["*tests*"]
+
+[tool.black]
+target-version = ['py38']
+line-length = 88
+
+[tool.isort]
+profile = "black"
+
+[tool.pylint.messages_control]
+disable = [
+    "line-too-long", # We use black to control this.
+    "logging-fstring-interpolation", # Logging in this repo is always fairly high severity, not an important rule
+    "missing-function-docstring", # TODO : REMOVE - TEMPORARY DURING INITIAL DEVELOPMENT
+    "missing-module-docstring", # TODO : REMOVE - TEMPORARY DURING INITIAL DEVELOPMENT
+    "missing-class-docstring", # TODO : REMOVE - TEMPORARY DURING INITIAL DEVELOPMENT
+]

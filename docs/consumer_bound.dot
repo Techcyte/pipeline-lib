@@ -1,0 +1,36 @@
+digraph search {
+overlap = false;
+#rankdir="LR";
+
+# compute nodes
+    node [
+        shape=rect
+        style=filled
+        fillcolor="white"
+        width=1.5
+        height=0.75
+        fixedsize=true
+    ]
+    subgraph subs {
+        rank="same"
+        m1 [label="Slot 1", fillcolor="gray"]
+        m2 [label="Slot 2", fillcolor="gray"]
+        m3 [label="Slot 3", fillcolor="gray"]
+        m4 [label="Slot 4", fillcolor="gray"]
+        m5 [label="Slot 5", fillcolor="gray"]
+        m6 [label="Slot 6", fillcolor="gray"]
+        m7 [label="Slot 7", fillcolor="gray"]
+    }
+    p1 [label="Producer 1", fillcolor="white"]
+    p2 [label="Producer 2", fillcolor="white"]
+
+    subgraph subs2 {
+        rank=max
+        c2 [label="Consumer 2", fillcolor="gray"]
+        c1 [label="Consumer 1", fillcolor="gray"]
+    }
+
+    p2 -> m1 [color=white]
+    c1 -> m1
+    c2 -> m7
+}
