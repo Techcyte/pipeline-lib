@@ -118,7 +118,7 @@ def _start_sink(
 
 def _warn_parameter_overrides(tasks: List[PipelineTask]):
     for task in tasks:
-        if task.max_message_size != DEFAULT_BUF_SIZE:
+        if task.max_message_size is not None and task.max_message_size != DEFAULT_BUF_SIZE:
             warnings.warn(
                 f"Task '{task.name}' overrode default value of max_message_size, and this override is ignored by 'thread' parallelism strategy."
             )

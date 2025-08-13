@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-version = "0.3.3"
+version = "0.3.4"
 name = "pipeline-lib"
 description = "A streaming pipeline accelerator for Python"
 readme = "README.md"

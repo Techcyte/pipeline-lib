@@ -12,7 +12,7 @@ from .pipeline_task import (
 def _warn_parameter_overrides(tasks: List[PipelineTask]):
     for task in tasks:
         if (
-            task.max_message_size != DEFAULT_BUF_SIZE
+            (task.max_message_size != DEFAULT_BUF_SIZE and task.max_message_size is not None)
             or task.num_workers != DEFAULT_NUM_WORKERS
             or task.packets_in_flight != DEFAULT_PACKETS_IN_FLIGHT
         ):
