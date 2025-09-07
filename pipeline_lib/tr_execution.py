@@ -5,7 +5,7 @@ import traceback
 import warnings
 from collections import deque
 from threading import Lock, Semaphore, get_native_id
-from typing import Any, Iterable, List, Optional
+from typing import Any, Iterable, List, Optional, Set
 
 from .pipeline_task import DEFAULT_BUF_SIZE, InactivityError, PipelineTask, TaskError
 from .type_checking import MAX_NUM_WORKERS, sanity_check_mp_params
@@ -87,7 +87,7 @@ def _start_worker(
     task: PipelineTask,
     upstream: TaskOutput,
     downstream: TaskOutput,
-    clean_completed: set[int],
+    clean_completed: Set[int],
 ):
     try:
         constants = {} if task.constants is None else task.constants
@@ -105,7 +105,7 @@ def _start_worker(
 def _start_source(
     task: PipelineTask,
     downstream: TaskOutput,
-    clean_completed: set[int],
+    clean_completed: Set[int],
 ):
     try:
         out_iter = task.generator(**task.constants_dict)
@@ -119,7 +119,7 @@ def _start_source(
 def _start_sink(
     task: PipelineTask,
     upstream: TaskOutput,
-    clean_completed: set[int],
+    clean_completed: Set[int],
 ):
     try:
         generator_input = upstream.iter_results()
@@ -163,12 +163,12 @@ def execute_tr(tasks: List[PipelineTask], inactivity_timeout: Optional[float]):
     source_task = tasks[0]
     sink_task = tasks[-1]
     worker_tasks = tasks[1:-1]
-    clean_completed: set[int] = set()
+    clean_completed: Set[int] = set()
 
     # number of processes are of the producing task
     data_streams = [TaskOutput(t.num_workers, t.packets_in_flight) for t in tasks[:-1]]
     # only one source thread per program
-    threads: list[tuple[str, tr.Thread]] = [
+    threads: List[tuple[str, tr.Thread]] = [
         (
             source_task.name,
             tr.Thread(

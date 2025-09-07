@@ -23,7 +23,7 @@ from multiprocessing.context import (
     SpawnProcess,
 )
 from operator import mul
-from typing import Any, Iterable, List, Literal, Optional, Tuple, Union
+from typing import Any, Iterable, List, Literal, Optional, Set, Tuple, Union
 
 import cloudpickle
 
@@ -538,7 +538,7 @@ def _start_worker(
 
 
 @contextlib.contextmanager
-def sighandler(signums: set[int], processes: List[Union[ForkProcess, SpawnProcess]]):
+def sighandler(signums: Set[int], processes: List[Union[ForkProcess, SpawnProcess]]):
     def sigterm_handler(signum, _frame):
         # propogate the signal to children processes
         for proc in processes:
