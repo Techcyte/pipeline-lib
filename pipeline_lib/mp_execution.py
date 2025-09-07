@@ -23,7 +23,7 @@ from multiprocessing.context import (
     SpawnProcess,
 )
 from operator import mul
-from typing import Any, Iterable, List, Literal, Optional, Tuple, Union
+from typing import Any, Iterable, List, Literal, Optional, Set, Tuple, Union
 
 import cloudpickle
 
@@ -538,7 +538,7 @@ def _start_worker(
 
 
 @contextlib.contextmanager
-def sighandler(signum: int, processes: List[Union[ForkProcess, SpawnProcess]]):
+def sighandler(signums: Set[int], processes: List[Union[ForkProcess, SpawnProcess]]):
     def sigterm_handler(signum, _frame):
         # propogate the signal to children processes
         for proc in processes:
@@ -550,18 +550,29 @@ def sighandler(signum: int, processes: List[Union[ForkProcess, SpawnProcess]]):
         # throw an exception to trigger the exceptional cleanup policy
         raise SignalReceived(signum)
 
-    old_handling = signal.getsignal(signum)
-    signal.signal(signum, sigterm_handler)
+    old_handlings = {}
+    for signum in signums:
+        old_handlings[signum] = signal.getsignal(signum)
+        signal.signal(signum, sigterm_handler)
+    did_reset_handling = False
     try:
         yield
     except SignalReceived as sigerr:
-        if sigerr.signum == signum:
+        if sigerr.signum in signums:
             # if the signal was raised by our signal handler, then retry the old signal handling method
             # so the end user of the library can handle signals in the way they wish to
-            signal.signal(signum, old_handling)
-            signal.raise_signal(signum)
+            for signum, old_handling in old_handlings.items():
+                signal.signal(signum, old_handling)
+            did_reset_handling = True
+            signal.raise_signal(sigerr.signum)
+            # else re-raise error
+        else:
+            raise sigerr
     finally:
-        signal.signal(signum, old_handling)
+        # only reset handling here if not done in except statement
+        if not did_reset_handling:
+            for signum, old_handling in old_handlings.items():
+                signal.signal(signum, old_handling)
 
 
 def _start_sink(
@@ -657,7 +668,7 @@ def execute_mp(
 
     # signal setup must be *after* all new processes are started, so that main processes
     # signal handling won't be copied over to children
-    with sighandler(signal.SIGINT, processes), sighandler(signal.SIGTERM, processes):
+    with sighandler({signal.SIGINT, signal.SIGTERM}, processes):
         has_error = False
         try:
             sentinel_map = {proc.sentinel: proc for proc in processes}
