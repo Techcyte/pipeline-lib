@@ -3,12 +3,6 @@ import os
 import signal
 import time
 from multiprocessing import synchronize
-from test.test_execution_correctness import (
-    BIG_MESSAGE_BYTES,
-    process_message,
-    save_results,
-    sum_arrays,
-)
 from typing import Any, Dict
 
 import numpy as np
@@ -324,24 +318,17 @@ def test_single_worker_unexpected_exit(parallelism: ParallelismStrategy):
         execute(tasks, parallelism)
 
 
-def hang_message_passing() -> Iterable[Dict[str, Any]]:
+def hang_message_passing() -> Iterable[int]:
     for i in range(8):
-        val1 = np.arange(10000, dtype="int32").reshape(100, -1) + i
-        yield {
-            "message_type": "big",
-            "message_1_contents": val1,
-            "val1_ref": val1,
-            "message_2_contents": (np.arange(500, dtype="int64") * i),
-        }
+        yield i
     exit(0)
 
 
-# if it takes more than 10 seconds for a 5 second timeout to complete, something is wrong
+# if it takes more than 120 seconds for a 5 second timeout to complete, something is wrong
 @pytest.mark.timeout(120)
 @pytest.mark.parametrize("parallelism", process_parallelism_options)
-@pytest.mark.parametrize("max_message_size", [BIG_MESSAGE_BYTES, None])
+@pytest.mark.parametrize("max_message_size", [10000, None])
 def test_hang_message_passing_timeout(
-    tmpdir: str,
     max_message_size: bool,
     parallelism: ParallelismStrategy,
 ):
@@ -354,18 +341,23 @@ def test_hang_message_passing_timeout(
             packets_in_flight=packets_in_flight,
         ),
         PipelineTask(
-            process_message,
+            group_numbers,
+            constants={"num_groups": 3},
             max_message_size=max_message_size,
             packets_in_flight=packets_in_flight,
             num_workers=n_procs,
         ),
         PipelineTask(
-            sum_arrays,
+            sum_numbers,
             max_message_size=max_message_size,
             packets_in_flight=packets_in_flight,
             num_workers=n_procs,
         ),
-        PipelineTask(save_results, constants=dict(tmpdir=tmpdir)),
+        PipelineTask(print_numbers),
     ]
     with raises_from(InactivityError):
         execute(tasks, parallelism, inactivity_timeout=5)
+
+
+if __name__ == "__main__":
+    test_hang_message_passing_timeout(1000, 'process-fork')

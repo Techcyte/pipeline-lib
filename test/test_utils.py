@@ -1,7 +1,7 @@
 import time
 import typing
-from typing import Iterable, List
 from contextlib import contextmanager
+from typing import Iterable, List
 
 import pytest
 
