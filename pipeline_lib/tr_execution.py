@@ -10,7 +10,6 @@ from typing import Any, Iterable, List
 from .pipeline_task import DEFAULT_BUF_SIZE, InactivityError, PipelineTask, TaskError
 from .type_checking import MAX_NUM_WORKERS, sanity_check_mp_params
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -102,6 +101,7 @@ def _start_worker(
         downstream.set_error(task.name, err, tb_str)
         upstream.set_error(task.name, err, tb_str)
 
+
 def _start_source(
     task: PipelineTask,
     downstream: TaskOutput,
@@ -139,7 +139,7 @@ def _warn_parameter_overrides(tasks: List[PipelineTask]):
 
 
 def execute_tr(tasks: List[PipelineTask], inactivity_timeout: float | None):
-    # pylint: disable=too-many-branches
+    # pylint: disable=too-many-branches,too-many-locals,too-many-statements
     """
     execute tasks until final task completes.
     Raises error if tasks are inconsistently specified or if
@@ -163,7 +163,7 @@ def execute_tr(tasks: List[PipelineTask], inactivity_timeout: float | None):
     source_task = tasks[0]
     sink_task = tasks[-1]
     worker_tasks = tasks[1:-1]
-    clean_completed = set()
+    clean_completed: set[int] = set()
 
     # number of processes are of the producing task
     data_streams = [TaskOutput(t.num_workers, t.packets_in_flight) for t in tasks[:-1]]
@@ -210,7 +210,6 @@ def execute_tr(tasks: List[PipelineTask], inactivity_timeout: float | None):
 
     has_error = False
     thread_id_to_name = {thread.native_id: name for name, thread in threads}
-    name_to_thread: dict[str, tr.Thread] = {name: thread for name, thread in threads}
 
     sentinel_set = {proc.native_id for _name, proc in threads}
     try:
