@@ -5,7 +5,7 @@ import traceback
 import warnings
 from collections import deque
 from threading import Lock, Semaphore, get_native_id
-from typing import Any, Iterable, List
+from typing import Any, Iterable, List, Optional
 
 from .pipeline_task import DEFAULT_BUF_SIZE, InactivityError, PipelineTask, TaskError
 from .type_checking import MAX_NUM_WORKERS, sanity_check_mp_params
@@ -138,7 +138,7 @@ def _warn_parameter_overrides(tasks: List[PipelineTask]):
             )
 
 
-def execute_tr(tasks: List[PipelineTask], inactivity_timeout: float | None):
+def execute_tr(tasks: List[PipelineTask], inactivity_timeout: Optional[float]):
     # pylint: disable=too-many-branches,too-many-locals,too-many-statements
     """
     execute tasks until final task completes.
