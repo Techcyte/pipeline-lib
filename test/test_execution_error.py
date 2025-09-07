@@ -161,7 +161,7 @@ def test_inactivity_timeout_missed(parallelism: ParallelismStrategy):
     ]
     # pipeline step should take about 10 seconds, 100 iters of 0.1 seconds each, so
     # this catches that it is only inactivity
-    execute(tasks, parallelism, inactivity_timeout=2)
+    execute(tasks, parallelism, inactivity_timeout=5)
 
 
 def consume_infinite_ints(vals: Iterable[int]) -> None:
@@ -300,7 +300,12 @@ def test_single_worker_unexpected_exit(parallelism: ParallelismStrategy):
     if one process dies and the others do not, then it should still raise an exception,
     as the dead process might have consumed an important message
     """
-    started_event = mp.Event()
+    process_context_map: Dict[ParallelismStrategy, str] = {
+        "process-fork": "fork",
+        "process-spawn": "spawn",
+    }
+    ctx = mp.get_context(process_context_map[parallelism])
+    started_event = ctx.Event()
     tasks = [
         PipelineTask(
             generate_infinite,

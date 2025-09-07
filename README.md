@@ -246,7 +246,7 @@ Two insights are:
 
 Package can be installed locally with `pip install -e .`
 
-Tests can be run with `pytest test`
+Tests can be run with `pytest -n 8 test`
 
 See [CONTRIBUTIONS.md](/CONTRIBUTIONS.md) for more information on what sorts of contibutions we are looking for.
 
