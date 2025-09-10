@@ -8,6 +8,7 @@ from typing import Any, Dict
 import numpy as np
 import psutil
 import pytest
+from pytest import raises
 
 import pipeline_lib
 from pipeline_lib import PipelineTask, execute
@@ -18,7 +19,6 @@ from .example_funcs import *
 from .test_utils import (
     all_parallelism_options,
     process_parallelism_options,
-    raises,
     sleeper,
     thread_parallelism_options,
 )
