@@ -4,7 +4,7 @@ import time
 import traceback
 import warnings
 from collections import deque
-from threading import Lock, Semaphore, get_native_id
+from threading import RLock, Semaphore, get_native_id
 from typing import Any, Iterable, List, Optional, Set
 
 from .pipeline_task import DEFAULT_BUF_SIZE, InactivityError, PipelineTask, TaskError
@@ -24,7 +24,7 @@ class TaskOutput:
         self.packets_space = Semaphore(value=packets_in_flight)
         self.queue: deque = deque(maxlen=packets_in_flight)
         self.last_updated_time = time.monotonic()
-        self.lock = Lock()
+        self.lock = RLock()
         self.error_info = None
 
     def iter_results(self) -> Iterable[Any]:
@@ -94,12 +94,13 @@ def _start_worker(
         generator_input = upstream.iter_results()
         out_iter = task.generator(generator_input, **constants)
         downstream.put_results(out_iter)
-        clean_completed.add(get_native_id())
     except BaseException as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
         # sets upstream and downstream so that error propagates throughout the system
         downstream.set_error(task.name, err, tb_str)
         upstream.set_error(task.name, err, tb_str)
+    finally:
+        clean_completed.add(get_native_id())
 
 
 def _start_source(
@@ -110,10 +111,11 @@ def _start_source(
     try:
         out_iter = task.generator(**task.constants_dict)
         downstream.put_results(out_iter)
-        clean_completed.add(get_native_id())
     except BaseException as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
         downstream.set_error(task.name, err, tb_str)
+    finally:
+        clean_completed.add(get_native_id())
 
 
 def _start_sink(
@@ -124,10 +126,11 @@ def _start_sink(
     try:
         generator_input = upstream.iter_results()
         task.generator(generator_input, **task.constants_dict)
-        clean_completed.add(get_native_id())
     except BaseException as err:  # pylint: disable=broad-except
         tb_str = traceback.format_exc()
         upstream.set_error(task.name, err, tb_str)
+    finally:
+        clean_completed.add(get_native_id())
 
 
 def _warn_parameter_overrides(tasks: List[PipelineTask]):
@@ -208,7 +211,6 @@ def execute_tr(tasks: List[PipelineTask], inactivity_timeout: Optional[float]):
     for name, thread in threads:
         thread.start()
 
-    has_error = False
     thread_id_to_name = {thread.native_id: name for name, thread in threads}
 
     sentinel_set = {proc.native_id for _name, proc in threads}
@@ -266,15 +268,8 @@ def execute_tr(tasks: List[PipelineTask], inactivity_timeout: Optional[float]):
                         stream.set_error(
                             thread_id_to_name[done_id], TaskError(proc_err_msg), ""
                         )
-                    has_error = True
-                    break
+                    raise TaskError(f"Improper thread exit; {task_name}")
 
-            if has_error:
-                # got an error but don't know much if anything about it
-                # should only be at most one unique error, just raise it
-                for stream in data_streams:
-                    stream.set_error(task_name, err, traceback_str)
-                raise TaskError(f"Task; {task_name} errored\n{traceback_str}\n{err}")
 
     except BaseException as err:
         # asks all threads to terminate as quickly as possible
