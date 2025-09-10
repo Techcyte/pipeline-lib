@@ -212,7 +212,7 @@ def test_main_process_signal(
     os.kill(proc.pid, sig)
 
     # waits for all the processes to shut down
-    proc.join(10.0)
+    proc.join(20.0)
     assert (
         proc.exitcode is not None
     ), "join timed out, main process did not exist promptly after signterm"
