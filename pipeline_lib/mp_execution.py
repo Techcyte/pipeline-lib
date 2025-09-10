@@ -720,9 +720,10 @@ def execute_mp(
                 # first entry on the error queue should hopefully be the original error, just raise that one single error
                 (task_name, task_err, traceback_str), _ = err_queue.get()
                 # should only be at most one unique error, just raise it
-                raise TaskError(
+                # the main error needs to be the main raise for type-based exception catching to work
+                raise task_err from TaskError(
                     f"Task; {task_name} errored\n{traceback_str}\n{task_err}"
-                ) from task_err
+                )
 
         except BaseException as err:  # pylint: disable=broad-except
             if not has_error:
