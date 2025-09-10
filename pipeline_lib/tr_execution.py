@@ -132,7 +132,7 @@ def _start_sink(
 
 def _warn_parameter_overrides(tasks: List[PipelineTask]):
     for task in tasks:
-        if task.max_message_size is None or task.max_message_size != DEFAULT_BUF_SIZE:
+        if task.max_message_size is not None and task.max_message_size != DEFAULT_BUF_SIZE:
             warnings.warn(
                 f"Task '{task.name}' overrode default value of max_message_size, and this override is ignored by 'thread' parallelism strategy."
             )
@@ -245,7 +245,18 @@ def execute_tr(tasks: List[PipelineTask], inactivity_timeout: Optional[float]):
                     done_sentinels.add(thread.native_id)
                     sentinel_set.remove(thread.native_id)
 
+            # check for handled errors
             task_name, err, traceback_str = ("", "", "")
+            for stream in data_streams:
+                with stream.lock:
+                    if stream.error_info is not None and not isinstance(
+                        stream.error_info[1], PropogateErr
+                    ):
+                        # should only be at most one unique error, just raise it
+                        task_name, err, traceback_str = stream.error_info
+                        raise err
+
+            # check for weird unhandled errors (defensive coding, don't know of real world situations which would cause this)
             for done_id in done_sentinels:
                 if done_id not in clean_completed:
                     # attempts to catch various errors that aren't caught by python (i.g. sigkill)
@@ -258,14 +269,6 @@ def execute_tr(tasks: List[PipelineTask], inactivity_timeout: Optional[float]):
                     has_error = True
                     break
 
-            for stream in data_streams:
-                if stream.error_info is not None and not isinstance(
-                    stream.error_info[1], PropogateErr
-                ):
-                    # should only be at most one unique error, just raise it
-                    task_name, err, traceback_str = stream.error_info
-                    raise err
-
             if has_error:
                 # got an error but don't know much if anything about it
                 # should only be at most one unique error, just raise it
@@ -276,8 +279,11 @@ def execute_tr(tasks: List[PipelineTask], inactivity_timeout: Optional[float]):
     except BaseException as err:
         # asks all threads to terminate as quickly as possible
         tb_str = traceback.format_exc()
+        # sets errors in streams in case they aren't already set
         for stream in data_streams:
-            stream.set_error("main_task", err, tb_str)
+            with stream.lock:
+                if stream.error_info is None:
+                    stream.set_error("main_task", err, tb_str)
         # clean up remaining threads so that main process terminates properly
         for _name, thread in threads:
             thread.join(15)
