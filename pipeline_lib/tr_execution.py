@@ -1,7 +1,6 @@
 import logging
 import threading as tr
 import time
-import traceback
 import warnings
 from collections import deque
 from threading import RLock, Semaphore, get_native_id
@@ -73,10 +72,10 @@ class TaskOutput:
         with self.lock:
             return self.error_info is not None
 
-    def set_error(self, task_name, err, traceback_str):
+    def set_error(self, task_name, err):
         with self.lock:
             if self.error_info is None:
-                self.error_info = (task_name, err, traceback_str)
+                self.error_info = (task_name, err)
         # release all consumers and producers semaphores so that they exit quickly
         for _i in range(MAX_NUM_WORKERS):
             self.queue_len.release()
@@ -95,10 +94,9 @@ def _start_worker(
         out_iter = task.generator(generator_input, **constants)
         downstream.put_results(out_iter)
     except BaseException as err:  # pylint: disable=broad-except
-        tb_str = traceback.format_exc()
         # sets upstream and downstream so that error propagates throughout the system
-        downstream.set_error(task.name, err, tb_str)
-        upstream.set_error(task.name, err, tb_str)
+        downstream.set_error(task.name, err)
+        upstream.set_error(task.name, err)
     finally:
         clean_completed.add(get_native_id())
 
@@ -112,8 +110,7 @@ def _start_source(
         out_iter = task.generator(**task.constants_dict)
         downstream.put_results(out_iter)
     except BaseException as err:  # pylint: disable=broad-except
-        tb_str = traceback.format_exc()
-        downstream.set_error(task.name, err, tb_str)
+        downstream.set_error(task.name, err)
     finally:
         clean_completed.add(get_native_id())
 
@@ -127,8 +124,7 @@ def _start_sink(
         generator_input = upstream.iter_results()
         task.generator(generator_input, **task.constants_dict)
     except BaseException as err:  # pylint: disable=broad-except
-        tb_str = traceback.format_exc()
-        upstream.set_error(task.name, err, tb_str)
+        upstream.set_error(task.name, err)
     finally:
         clean_completed.add(get_native_id())
 
@@ -251,14 +247,14 @@ def execute_tr(tasks: List[PipelineTask], inactivity_timeout: Optional[float]):
                     sentinel_set.remove(thread.native_id)
 
             # check for handled errors
-            task_name, err, traceback_str = ("", "", "")
+            task_name, err = ("", "")
             for stream in data_streams:
                 with stream.lock:
                     if stream.error_info is not None and not isinstance(
                         stream.error_info[1], PropogateErr
                     ):
                         # should only be at most one unique error, just raise it
-                        task_name, err, traceback_str = stream.error_info
+                        task_name, err = stream.error_info
                         # somehow this error retains the full trackback, no reason to include the thread-specific traceback here
                         raise err
 
@@ -270,18 +266,16 @@ def execute_tr(tasks: List[PipelineTask], inactivity_timeout: Optional[float]):
                     task_name = thread_id_to_name[done_id]
                     for stream in data_streams:
                         stream.set_error(
-                            thread_id_to_name[done_id], TaskError(proc_err_msg), ""
+                            thread_id_to_name[done_id], TaskError(proc_err_msg)
                         )
                     raise TaskError(f"Improper thread exit; {task_name}")
 
     except BaseException as err:
-        # asks all threads to terminate as quickly as possible
-        tb_str = traceback.format_exc()
         # sets errors in streams in case they aren't already set
         for stream in data_streams:
             with stream.lock:
                 if stream.error_info is None:
-                    stream.set_error("main_task", err, tb_str)
+                    stream.set_error("main_task", err)
         # clean up remaining threads so that main process terminates properly
         for _name, thread in threads:
             thread.join(15)
