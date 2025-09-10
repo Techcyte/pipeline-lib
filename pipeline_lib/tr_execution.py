@@ -135,7 +135,10 @@ def _start_sink(
 
 def _warn_parameter_overrides(tasks: List[PipelineTask]):
     for task in tasks:
-        if task.max_message_size is not None and task.max_message_size != DEFAULT_BUF_SIZE:
+        if (
+            task.max_message_size is not None
+            and task.max_message_size != DEFAULT_BUF_SIZE
+        ):
             warnings.warn(
                 f"Task '{task.name}' overrode default value of max_message_size, and this override is ignored by 'thread' parallelism strategy."
             )
@@ -256,7 +259,9 @@ def execute_tr(tasks: List[PipelineTask], inactivity_timeout: Optional[float]):
                     ):
                         # should only be at most one unique error, just raise it
                         task_name, err, traceback_str = stream.error_info
-                        raise err
+                        raise TaskError(
+                            f"Task; {task_name} errored\n{traceback_str}\n{err}"
+                        ) from err
 
             # check for weird unhandled errors (defensive coding, don't know of real world situations which would cause this)
             for done_id in done_sentinels:
@@ -269,7 +274,6 @@ def execute_tr(tasks: List[PipelineTask], inactivity_timeout: Optional[float]):
                             thread_id_to_name[done_id], TaskError(proc_err_msg), ""
                         )
                     raise TaskError(f"Improper thread exit; {task_name}")
-
 
     except BaseException as err:
         # asks all threads to terminate as quickly as possible
