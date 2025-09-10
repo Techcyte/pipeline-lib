@@ -18,7 +18,7 @@ from .example_funcs import *
 from .test_utils import (
     all_parallelism_options,
     process_parallelism_options,
-    raises_from,
+    raises,
     sleeper,
     thread_parallelism_options,
 )
@@ -48,7 +48,7 @@ def test_execute_exception(parallelism: ParallelismStrategy):
             print_numbers,
         ),
     ]
-    with raises_from(TestExpectedException):
+    with raises(TestExpectedException):
         execute(tasks, parallelism)
 
 
@@ -76,7 +76,7 @@ def test_sudden_exit_middle(parallelism: ParallelismStrategy):
             print_numbers,
         ),
     ]
-    with raises_from(SuddenExit):
+    with raises(SuddenExit):
         execute(tasks, parallelism)
 
 
@@ -91,7 +91,7 @@ def test_sudden_exit_end(parallelism: ParallelismStrategy):
         ),
         PipelineTask(print_numbers),
     ]
-    with raises_from(SuddenExit):
+    with raises(SuddenExit):
         execute(tasks, parallelism)
 
 
@@ -110,7 +110,7 @@ def test_sudden_exit_middle_sleepers(parallelism: ParallelismStrategy):
             print_numbers,
         ),
     ]
-    with raises_from(SuddenExit):
+    with raises(SuddenExit):
         execute(tasks, parallelism)
 
 
@@ -134,7 +134,7 @@ def test_inactivty_timeout(parallelism: ParallelismStrategy):
             print_numbers,
         ),
     ]
-    with raises_from(InactivityError):
+    with raises(InactivityError):
         execute(tasks, parallelism, inactivity_timeout=0.1)
 
 
@@ -267,7 +267,7 @@ def test_single_worker_error(parallelism: ParallelismStrategy):
         ),
         PipelineTask(print_numbers, num_workers=2, packets_in_flight=2),
     ]
-    with raises_from(TestExpectedException):
+    with raises(TestExpectedException):
         execute(tasks, parallelism)
 
 
@@ -314,7 +314,7 @@ def test_single_worker_unexpected_exit(parallelism: ParallelismStrategy):
         ),
         PipelineTask(print_numbers, num_workers=2, packets_in_flight=2),
     ]
-    with raises_from(pipeline_lib.pipeline_task.TaskError):
+    with raises(pipeline_lib.pipeline_task.TaskError):
         execute(tasks, parallelism)
 
 
@@ -355,9 +355,9 @@ def test_hang_message_passing_timeout(
         ),
         PipelineTask(print_numbers),
     ]
-    with raises_from(InactivityError):
+    with raises(InactivityError):
         execute(tasks, parallelism, inactivity_timeout=5)
 
 
 if __name__ == "__main__":
-    test_hang_message_passing_timeout(1000, 'process-fork')
+    test_hang_message_passing_timeout(1000, "process-fork")

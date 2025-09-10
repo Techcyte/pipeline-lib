@@ -259,9 +259,8 @@ def execute_tr(tasks: List[PipelineTask], inactivity_timeout: Optional[float]):
                     ):
                         # should only be at most one unique error, just raise it
                         task_name, err, traceback_str = stream.error_info
-                        raise TaskError(
-                            f"Task; {task_name} errored\n{traceback_str}\n{err}"
-                        ) from err
+                        # somehow this error retains the full trackback, no reason to include the thread-specific traceback here
+                        raise err
 
             # check for weird unhandled errors (defensive coding, don't know of real world situations which would cause this)
             for done_id in done_sentinels:

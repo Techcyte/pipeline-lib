@@ -29,13 +29,11 @@ def sleeper(vals: Iterable[int], sleep_time: float) -> Iterable[int]:
 
 
 @contextmanager
-def raises_from(err_type):
+def raises(err_type):
     try:
         yield
     except Exception as err:
-        if isinstance(err, err_type) or (
-            err.__cause__ and isinstance(err.__cause__, err_type)
-        ):
+        if isinstance(err, err_type):
             # passes test
             return
         raise AssertionError(f"expected error of type {err_type} got error {err}")
@@ -44,7 +42,7 @@ def raises_from(err_type):
 def test_raises_from():
     # tests testing utility above
     with pytest.raises(AssertionError):
-        with raises_from(RuntimeError):
+        with raises(RuntimeError):
             raise ValueError()
-    with raises_from(ValueError):
+    with raises(ValueError):
         raise ValueError()
