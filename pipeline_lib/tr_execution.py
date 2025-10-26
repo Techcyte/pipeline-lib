@@ -176,6 +176,7 @@ def execute_tr(tasks: List[PipelineTask], inactivity_timeout: Optional[float]):
             tr.Thread(
                 target=_start_source,
                 args=(source_task, data_streams[0], clean_completed),
+                daemon=True,
             ),
         )
     ]
@@ -277,6 +278,8 @@ def execute_tr(tasks: List[PipelineTask], inactivity_timeout: Optional[float]):
                 if stream.error_info is None:
                     stream.set_error("main_task", err)
         # clean up remaining threads so that main process terminates properly
+        # if the thread is not joined in 15 seconds, then the thread will end up as
+        # a detatched daemon thread, which should at least allow the process to eventually exit
         for _name, thread in threads:
             thread.join(15)
         raise err
