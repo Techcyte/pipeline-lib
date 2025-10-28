@@ -288,4 +288,4 @@ def test_many_large_packets_correctness(
 
 
 if __name__ == "__main__":
-    test_full_synchronization("/tmp", "thread")
+    test_execute_basic("process-spawn-threading")
