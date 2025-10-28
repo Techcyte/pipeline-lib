@@ -390,6 +390,14 @@ def execute_trp(
             if not subprocess.exitcode:
                 # force kill the process (only if they are refusing to terminate cleanly)
                 subprocess.kill()
-                subprocess.join()
+                # this should exit very quickly after the force-kill, but putting a timeout on it anyways
+                # just so we can continue execution if the process hangs
+                subprocess.join(timeout=30.0)
+
+            # if somehow, this force-kill process didn't work, and the process is left hanging,
+            # there should be at least some visiblity to the user if the process really still is running,
+            # so that logs can be searched to find hanging processes
+            if subprocess.is_alive():
+                warnings.warn(f"Failed to join pipeline subprocess id: '{subprocess.pid}'")
 
             raise err
