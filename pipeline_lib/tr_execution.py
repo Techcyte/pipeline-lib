@@ -22,7 +22,7 @@ class TaskOutput:
         self.queue_len = Semaphore(value=0)
         self.packets_space = Semaphore(value=packets_in_flight)
         self.queue: deque = deque(maxlen=packets_in_flight)
-        self.last_updated_time = time.monotonic()
+        self.last_updated_time = time.time()
         self.lock = RLock()
         self.error_info = None
 
@@ -43,7 +43,7 @@ class TaskOutput:
             self.packets_space.release()
 
             # store the updated time to register that progress was made in the pipeline
-            self.last_updated_time = time.monotonic()
+            self.last_updated_time = time.time()
 
     def put_results(self, iterable: Iterable[Any]):
         iterator = iter(iterable)
@@ -223,10 +223,10 @@ def execute_tr(tasks: List[PipelineTask], inactivity_timeout: Optional[float]):
                 )
                 if (
                     inactivity_timeout is not None
-                    and time.monotonic() - last_updated_time > inactivity_timeout
+                    and time.time() - last_updated_time > inactivity_timeout
                 ):
                     raise InactivityError(
-                        f"Last updated time was {time.monotonic() - last_updated_time}s ago, pipeline inactivity timeout is {inactivity_timeout}s."
+                        f"Last updated time was {time.time() - last_updated_time}s ago, pipeline inactivity timeout is {inactivity_timeout}s."
                     )
 
             done_sentinels = set()

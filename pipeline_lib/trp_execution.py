@@ -1,16 +1,34 @@
-from ctypes import Union
+import contextlib
 import logging
-from multiprocessing.context import BaseContext, ForkContext, SpawnContext
+from multiprocessing.context import (
+    BaseContext,
+    ForkContext,
+    ForkProcess,
+    SpawnContext,
+    SpawnProcess,
+)
+import multiprocessing.connection as mp_connection
+import os
+import queue
+import signal
+import sys
 import threading as tr
 import time
+import traceback
 import typing
 import warnings
 from collections import deque
 from threading import RLock, Semaphore, get_native_id
-from typing import Any, Iterable, List, Optional, Set
+from typing import Any, Iterable, List, Optional, Set, Union
 import multiprocessing as mp
 
-from pipeline_lib.mp_execution import ERR_BUF_SIZE, BufferedQueue, SpawnContextName
+from pipeline_lib.mp_execution import (
+    ERR_BUF_SIZE,
+    PYTHON_ERR_EXIT_CODE,
+    BufferedQueue,
+    SignalReceived,
+    SpawnContextName,
+)
 
 from .pipeline_task import DEFAULT_BUF_SIZE, InactivityError, PipelineTask, TaskError
 from .type_checking import MAX_NUM_WORKERS, sanity_check_mp_params
@@ -23,15 +41,21 @@ class PropogateErr(RuntimeError):
 
 
 class TaskOutput:
-    def __init__(self, num_upstream_tasks: int, packets_in_flight: int, err_queue: BufferedQueue, ctx: BaseContext,) -> None:
+    def __init__(
+        self,
+        num_upstream_tasks: int,
+        packets_in_flight: int,
+        error_queue: BufferedQueue,
+        last_updated_time: Any,
+    ) -> None:
         self.num_tasks_remaining = num_upstream_tasks
-        self.err_queue = err_queue
         self.queue_len = Semaphore(value=0)
         self.packets_space = Semaphore(value=packets_in_flight)
         self.queue: deque = deque(maxlen=packets_in_flight)
-        self.last_updated_time = time.monotonic()
+        self.last_updated_time = last_updated_time
         self.lock = RLock()
-        self.has_error = ctx.Event()
+        self.error_info = None
+        self.error_queue = error_queue
 
     def iter_results(self) -> Iterable[Any]:
         while True:
@@ -50,7 +74,7 @@ class TaskOutput:
             self.packets_space.release()
 
             # store the updated time to register that progress was made in the pipeline
-            self.last_updated_time = time.monotonic()
+            self.last_updated_time = time.time()
 
     def put_results(self, iterable: Iterable[Any]):
         iterator = iter(iterable)
@@ -76,64 +100,105 @@ class TaskOutput:
                         self.queue_len.release()
 
     def is_errored(self):
-        return self.has_error.is_set()
+        with self.lock:
+            return self.error_info is not None
 
     def set_error(self, task_name, err, traceback_str):
-        if not self.has_error.is_set():
-            self.err_queue.put((task_name, err, traceback_str))
-            self.has_error.set()
-
+        with self.lock:
+            if self.error_info is None:
+                self.error_info = (task_name, err, traceback_str)
+                self.error_queue.put((task_name, err, traceback_str))
         # release all consumers and producers semaphores so that they exit quickly
         for _i in range(MAX_NUM_WORKERS):
             self.queue_len.release()
             self.packets_space.release()
 
 
-def _start_worker(
-    task: PipelineTask,
-    upstream: TaskOutput,
-    downstream: TaskOutput,
-    clean_completed: Set[int],
-):
-    try:
-        constants = {} if task.constants is None else task.constants
-        generator_input = upstream.iter_results()
-        out_iter = task.generator(generator_input, **constants)
-        downstream.put_results(out_iter)
-    except BaseException as err:  # pylint: disable=broad-except
-        # sets upstream and downstream so that error propagates throughout the system
-        downstream.set_error(task.name, err)
-        upstream.set_error(task.name, err)
-    finally:
-        clean_completed.add(get_native_id())
-
-
 def _start_source(
     task: PipelineTask,
     downstream: TaskOutput,
-    clean_completed: Set[int],
 ):
     try:
         out_iter = task.generator(**task.constants_dict)
         downstream.put_results(out_iter)
-    except BaseException as err:  # pylint: disable=broad-except
-        downstream.set_error(task.name, err)
-    finally:
-        clean_completed.add(get_native_id())
+    except Exception as err:  # pylint: disable=broad-except
+        tb_str = traceback.format_exc()
+        downstream.set_error(task.name, err, tb_str)
+        # exiting directly instead of re-raising error, as that would clutter stderr
+        # with duplicate tracebacks
+        sys.exit(PYTHON_ERR_EXIT_CODE)
+
+
+def _start_worker(
+    task: PipelineTask,
+    upstream: TaskOutput,
+    downstream: TaskOutput,
+):
+    try:
+        generator_input = upstream.iter_results()
+        out_iter = task.generator(generator_input, **task.constants_dict)
+        downstream.put_results(out_iter)
+    except Exception as err:  # pylint: disable=broad-except
+        tb_str = traceback.format_exc()
+        # sets upstream and downstream so that error propagates throughout the system
+        downstream.set_error(task.name, err, tb_str)
+        upstream.set_error(task.name, err, tb_str)
+        # exiting directly instead of re-raising error, as that would clutter stderr
+        # with duplicate tracebacks
+        sys.exit(PYTHON_ERR_EXIT_CODE)
 
 
 def _start_sink(
     task: PipelineTask,
     upstream: TaskOutput,
-    clean_completed: Set[int],
 ):
     try:
         generator_input = upstream.iter_results()
         task.generator(generator_input, **task.constants_dict)
-    except BaseException as err:  # pylint: disable=broad-except
-        upstream.set_error(task.name, err)
+    except Exception as err:  # pylint: disable=broad-except
+        tb_str = traceback.format_exc()
+        upstream.set_error(task.name, err, tb_str)
+        # exiting directly instead of re-raising error, as that would clutter stderr
+        # with duplicate tracebacks
+        sys.exit(PYTHON_ERR_EXIT_CODE)
+
+
+@contextlib.contextmanager
+def sighandler(signums: Set[int], processes: List[Union[ForkProcess, SpawnProcess]]):
+    def sigterm_handler(signum, _frame):
+        # propogate the signal to children processes
+        for proc in processes:
+            # os.kill just sends a signal like the command line tool
+            try:
+                os.kill(proc.ident, signum)
+            except ProcessLookupError:
+                logger.warning(f"Failed to find process {proc.ident}")
+        # throw an exception to trigger the exceptional cleanup policy
+        raise SignalReceived(signum)
+
+    old_handlings = {}
+    for signum in signums:
+        old_handlings[signum] = signal.getsignal(signum)
+        signal.signal(signum, sigterm_handler)
+    did_reset_handling = False
+    try:
+        yield
+    except SignalReceived as sigerr:
+        if sigerr.signum in signums:
+            # if the signal was raised by our signal handler, then retry the old signal handling method
+            # so the end user of the library can handle signals in the way they wish to
+            for signum, old_handling in old_handlings.items():
+                signal.signal(signum, old_handling)
+            did_reset_handling = True
+            signal.raise_signal(sigerr.signum)
+            # else re-raise error
+        else:
+            raise sigerr
     finally:
-        clean_completed.add(get_native_id())
+        # only reset handling here if not done in except statement
+        if not did_reset_handling:
+            for signum, old_handling in old_handlings.items():
+                signal.signal(signum, old_handling)
 
 
 def _warn_parameter_overrides(tasks: List[PipelineTask]):
@@ -147,10 +212,81 @@ def _warn_parameter_overrides(tasks: List[PipelineTask]):
             )
 
 
+def execute_thread_queue_errors(
+    tasks: List[PipelineTask], err_queue: BufferedQueue, last_updated_times: List[Any]
+):
+    if not tasks:
+        return
+
+    if len(tasks) == 1:
+        (task,) = tasks
+        task.generator(**task.constants_dict)
+        return
+
+    source_task = tasks[0]
+    sink_task = tasks[-1]
+    worker_tasks = tasks[1:-1]
+    clean_completed: Set[int] = set()
+
+    # number of processes are of the producing task
+    data_streams = [
+        TaskOutput(t.num_workers, t.packets_in_flight, err_queue, last_update_time)
+        for t, last_update_time in zip(tasks[:-1], last_updated_times)
+    ]
+    # only one source thread per program
+    threads: List[tuple[str, tr.Thread]] = [
+        (
+            source_task.name,
+            tr.Thread(
+                target=_start_source,
+                args=(
+                    source_task,
+                    data_streams[0],
+                ),
+            ),
+        )
+    ]
+    for i, worker_task in enumerate(worker_tasks):
+        for _ in range(worker_task.num_workers):
+            threads.append(
+                (
+                    worker_task.name,
+                    tr.Thread(
+                        target=_start_worker,
+                        args=(
+                            worker_task,
+                            data_streams[i],
+                            data_streams[i + 1],
+                        ),
+                    ),
+                )
+            )
+
+    for _ in range(sink_task.num_workers):
+        threads.append(
+            (
+                sink_task.name,
+                tr.Thread(
+                    target=_start_sink,
+                    args=(
+                        sink_task,
+                        data_streams[-1],
+                    ),
+                ),
+            )
+        )
+
+    for name, thread in threads:
+        thread.start()
+
+    for name, thread in threads:
+        thread.join()
+
+
 def execute_trp(
     tasks: List[PipelineTask],
     spawn_method: SpawnContextName,
-    inactivity_timeout: Optional[float]
+    inactivity_timeout: Optional[float],
 ):
     # pylint: disable=too-many-branches,too-many-locals,too-many-statements
     """
@@ -173,127 +309,86 @@ def execute_trp(
         task.generator(**task.constants_dict)
         return
 
-    source_task = tasks[0]
-    sink_task = tasks[-1]
-    worker_tasks = tasks[1:-1]
-    clean_completed: Set[int] = set()
-
     ctx = typing.cast(Union[ForkContext, SpawnContext], mp.get_context(spawn_method))
-
     n_total_tasks = sum(task.num_workers for task in tasks)
     # use a BufferedQueue because it synchronizes instantly, unlike PipedQueue or mp.queue
     err_queue = BufferedQueue(ERR_BUF_SIZE, n_total_tasks + 2, False, ctx)
 
-    # number of processes are of the producing task
-    data_streams = [TaskOutput(t.num_workers, t.packets_in_flight, err_queue) for t in tasks[:-1]]
-    # only one source thread per program
-    threads: List[tuple[str, tr.Thread]] = [
-        (
-            source_task.name,
-            tr.Thread(
-                target=_start_source,
-                args=(source_task, data_streams[0], clean_completed),
-            ),
-        )
+    last_updated_times = [
+        ctx.Value("d", time.time(), lock=False) for _ in range(len(tasks) - 1)
     ]
-    for i, worker_task in enumerate(worker_tasks):
-        for _ in range(worker_task.num_workers):
-            threads.append(
-                (
-                    worker_task.name,
-                    tr.Thread(
-                        target=_start_worker,
-                        args=(
-                            worker_task,
-                            data_streams[i],
-                            data_streams[i + 1],
-                            clean_completed,
-                        ),
-                    ),
-                )
-            )
+    subprocess = ctx.Process(
+        target=execute_thread_queue_errors, args=[tasks, err_queue, last_updated_times]
+    )
+    subprocess.start()
 
-    for _ in range(sink_task.num_workers):
-        threads.append(
-            (
-                sink_task.name,
-                tr.Thread(
-                    target=_start_sink,
-                    args=(sink_task, data_streams[-1], clean_completed),
+    # signal setup must be *after* all new processes are started, so that main processes
+    # signal handling won't be copied over to children
+    with sighandler({signal.SIGINT, signal.SIGTERM}, [subprocess]):
+        done_sentinels = None
+        try:
+            done_sentinels = mp_connection.wait(
+                [subprocess.sentinel],
+                timeout=(
+                    None if inactivity_timeout is None else inactivity_timeout / 10
                 ),
             )
-        )
-
-    for name, thread in threads:
-        thread.start()
-
-    thread_id_to_name = {thread.native_id: name for name, thread in threads}
-
-    sentinel_set = {proc.native_id for _name, proc in threads}
-    try:
-        while sentinel_set:
-            for stream in data_streams:
-                # no locking needed to read this value
-                # because the other threads are only writing
+            last_updated_time = max(
+                float(last_updated_time.value)
+                for last_updated_time in last_updated_times
+            )
+            if inactivity_timeout is not None and not done_sentinels:
+                # this means the timeout ended,
+                # time to check all of the task outputs timers
                 last_updated_time = max(
-                    float(stream.last_updated_time) for stream in data_streams
+                    float(last_updated_time.value)
+                    for last_updated_time in last_updated_times
                 )
-                if (
-                    inactivity_timeout is not None
-                    and time.monotonic() - last_updated_time > inactivity_timeout
-                ):
+                if time.time() - last_updated_time > inactivity_timeout:
                     raise InactivityError(
-                        f"Last updated time was {time.monotonic() - last_updated_time}s ago, pipeline inactivity timeout is {inactivity_timeout}s."
+                        f"Last updated time was {time.time() - last_updated_time}s ago, pipeline inactivity timeout is {inactivity_timeout}s."
                     )
 
-            done_sentinels = set()
-            is_first_thread = True
-            for name, thread in threads:
-                if thread.native_id not in sentinel_set:
-                    continue
-                if is_first_thread:
-                    timeout = (
-                        None if inactivity_timeout is None else inactivity_timeout / 10
+            if done_sentinels:
+                done_id = done_sentinels[0]
+                assert isinstance(
+                    done_id, int
+                ), f"mp_connection.wait returned unexpected type: {done_id}"
+                # for some reason needs a join, or the exitcode doesn't sync properly
+                # but it has already exited, so this should finish very quickly
+                subprocess.join()
+                if subprocess.exitcode is None:
+                    # unsure what could cause this, but we see it in production sometimes
+                    # when an instance is shutting down
+                    logger.warning("Child process joined with exitcode None.")
+                elif subprocess.exitcode != 0:
+                    # attempts to catch segfaults and other errors that cannot be caught by python (i.g. sigkill)
+                    raise TaskError(
+                        f"Process: {subprocess.name} exited with non-zero code {subprocess.exitcode}"
                     )
-                    is_first_thread = False
-                else:
-                    timeout = 0
-                thread.join(timeout=timeout)
-                if not thread.is_alive():
-                    done_sentinels.add(thread.native_id)
-                    sentinel_set.remove(thread.native_id)
 
-            # check for handled errors
-            task_name, err = ("", "")
-            for stream in data_streams:
-                with stream.lock:
-                    if stream.error_info is not None and not isinstance(
-                        stream.error_info[1], PropogateErr
-                    ):
-                        # should only be at most one unique error, just raise it
-                        task_name, err = stream.error_info
-                        # somehow this error retains the full trackback, no reason to include the thread-specific traceback here
-                        raise err
+            try:
+                # first entry on the error queue should hopefully be the original error, just raise that one single error
+                (task_name, task_err, traceback_str), _ = err_queue.get()
+                # should only be at most one unique error, just raise it
+                # the main error needs to be the main raise for type-based exception catching to work
+                raise task_err from TaskError(
+                    f"Task; {task_name} errored\n{traceback_str}\n{task_err}"
+                )
+            except queue.Empty:
+                # if the error queue is empty, then there is no error
+                pass
 
-            # check for weird unhandled errors (defensive coding, don't know of real world situations which would cause this)
-            for done_id in done_sentinels:
-                if done_id not in clean_completed:
-                    # attempts to catch various errors that aren't caught by python (i.g. sigkill)
-                    proc_err_msg = f"Thead: {done_id} exited improperly"
-                    task_name = thread_id_to_name[done_id]
-                    for stream in data_streams:
-                        stream.set_error(
-                            thread_id_to_name[done_id], TaskError(proc_err_msg)
-                        )
-                    raise TaskError(f"Improper thread exit; {task_name}")
+        except BaseException as err:  # pylint: disable=broad-except
+            # joins process as cleanup if they successfully exited
+            # give them a decent amount of time to process their current task and exit cleanly
+            subprocess.join(timeout=15.0)
+            # escalate, send sigterm to process
+            subprocess.terminate()
+            # wait for terminate signal to propagate through the process
+            subprocess.join(timeout=5.0)
+            # force kill the process (only if they are refusing to terminate cleanly)
+            subprocess.kill()
+            subprocess.join()
 
-    except BaseException as err:
-        # sets errors in streams in case they aren't already set
-        for stream in data_streams:
-            with stream.lock:
-                if stream.error_info is None:
-                    stream.set_error("main_task", err)
-        # clean up remaining threads so that main process terminates properly
-        for _name, thread in threads:
-            thread.join(15)
-        raise err
+            raise err
