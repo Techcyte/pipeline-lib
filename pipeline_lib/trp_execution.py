@@ -398,6 +398,8 @@ def execute_trp(
             # there should be at least some visiblity to the user if the process really still is running,
             # so that logs can be searched to find hanging processes
             if subprocess.is_alive():
-                warnings.warn(f"Failed to join pipeline subprocess id: '{subprocess.pid}'")
+                warnings.warn(
+                    f"Failed to join pipeline subprocess id: '{subprocess.pid}'"
+                )
 
             raise err

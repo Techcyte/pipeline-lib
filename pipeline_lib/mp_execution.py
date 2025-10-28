@@ -753,7 +753,8 @@ def execute_mp(
                 # there should be at least some visiblity to the user if the process really still is running,
                 # so that logs can be searched to find hanging processes
                 if proc.is_alive():
-                    warnings.warn(f"Failed to join pipeline subprocess id: '{proc.pid}'")
-
+                    warnings.warn(
+                        f"Failed to join pipeline subprocess id: '{proc.pid}'"
+                    )
 
             raise err
