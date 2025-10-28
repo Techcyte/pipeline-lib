@@ -14,18 +14,18 @@ thread_parallelism_options: List[ParallelismStrategy] = [
     "thread",
     "process-fork",
     "process-spawn",
-    "process-spawn-threading",
-    "process-fork-threading",
+    "thread-in-process-spawn",
+    "thread-in-process-fork",
 ]
 process_parallelism_options: List[ParallelismStrategy] = [
     "process-fork",
     "process-spawn",
-    "process-spawn-threading",
-    "process-fork-threading",
+    "thread-in-process-spawn",
+    "thread-in-process-fork",
 ]
 thread_in_process_parallelism_options: List[ParallelismStrategy] = [
-    "process-spawn-threading",
-    "process-fork-threading",
+    "thread-in-process-spawn",
+    "thread-in-process-fork",
 ]
 
 

@@ -12,8 +12,8 @@ ParallelismStrategy = Literal[
     "thread",
     "process-fork",
     "process-spawn",
-    "process-fork-threading",
-    "process-spawn-threading",
+    "thread-in-process-fork",
+    "thread-in-process-spawn",
     "coroutine",
 ]
 
@@ -54,9 +54,9 @@ def execute(
         execute_mp(tasks, "spawn", inactivity_timeout=inactivity_timeout)
     elif parallelism == "process-fork":
         execute_mp(tasks, "fork", inactivity_timeout=inactivity_timeout)
-    elif parallelism == "process-spawn-threading":
+    elif parallelism == "thread-in-process-spawn":
         execute_trp(tasks, "spawn", inactivity_timeout=inactivity_timeout)
-    elif parallelism == "process-fork-threading":
+    elif parallelism == "thread-in-process-fork":
         execute_trp(tasks, "fork", inactivity_timeout=inactivity_timeout)
     elif parallelism == "coroutine":
         assert (

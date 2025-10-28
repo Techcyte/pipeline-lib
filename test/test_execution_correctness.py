@@ -288,4 +288,4 @@ def test_many_large_packets_correctness(
 
 
 if __name__ == "__main__":
-    test_execute_basic("process-spawn-threading")
+    test_execute_basic("thread-in-process-spawn")

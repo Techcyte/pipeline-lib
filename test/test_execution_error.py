@@ -258,7 +258,7 @@ def test_single_worker_error(parallelism: ParallelismStrategy):
     """
     mp_context = (
         mp.get_context("spawn")
-        if parallelism == "process-spawn" or parallelism == "process-spawn-threading"
+        if parallelism == "process-spawn" or parallelism == "thread-in-process-spawn"
         else mp
     )
     started_event = mp_context.Event()
@@ -306,8 +306,8 @@ def test_single_worker_unexpected_exit(parallelism: ParallelismStrategy):
     process_context_map: Dict[ParallelismStrategy, str] = {
         "process-fork": "fork",
         "process-spawn": "spawn",
-        "process-fork-threading": "fork",
-        "process-spawn-threading": "spawn",
+        "thread-in-process-fork": "fork",
+        "thread-in-process-spawn": "spawn",
     }
     ctx = mp.get_context(process_context_map[parallelism])
     started_event = ctx.Event()
