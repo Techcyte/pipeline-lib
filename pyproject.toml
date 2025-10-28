@@ -56,5 +56,5 @@ disable = [
     "missing-function-docstring", # TODO : REMOVE - TEMPORARY DURING INITIAL DEVELOPMENT
     "missing-module-docstring", # TODO : REMOVE - TEMPORARY DURING INITIAL DEVELOPMENT
     "missing-class-docstring", # TODO : REMOVE - TEMPORARY DURING INITIAL DEVELOPMENT
-    "duplicate-code", # copypasta is an intentional design choice meant to improve readbility over editability
+    "duplicate-code", # copypasta is an intentional design choice meant to improve readbility and fine-grained control over each and every execution method to maximize efficiency and reliability over broad edits and refactors
 ]
