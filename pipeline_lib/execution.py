@@ -6,8 +6,16 @@ from .mp_execution import execute_mp
 from .pipeline_task import PipelineTask
 from .seq_execution import execute_seq
 from .tr_execution import execute_tr
+from .trp_execution import execute_trp
 
-ParallelismStrategy = Literal["thread", "process-fork", "process-spawn", "coroutine"]
+ParallelismStrategy = Literal[
+    "thread",
+    "process-fork",
+    "process-spawn",
+    "thread-in-process-fork",
+    "thread-in-process-spawn",
+    "coroutine",
+]
 
 # list of strings in ParallelismStrategy
 PARALLELISM_STRATEGIES: Tuple[str, ...] = get_args(ParallelismStrategy)
@@ -46,6 +54,10 @@ def execute(
         execute_mp(tasks, "spawn", inactivity_timeout=inactivity_timeout)
     elif parallelism == "process-fork":
         execute_mp(tasks, "fork", inactivity_timeout=inactivity_timeout)
+    elif parallelism == "thread-in-process-spawn":
+        execute_trp(tasks, "spawn", inactivity_timeout=inactivity_timeout)
+    elif parallelism == "thread-in-process-fork":
+        execute_trp(tasks, "fork", inactivity_timeout=inactivity_timeout)
     elif parallelism == "coroutine":
         assert (
             inactivity_timeout is None

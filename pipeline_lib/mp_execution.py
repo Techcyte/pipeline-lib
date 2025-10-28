@@ -12,6 +12,7 @@ import threading as tr
 import time
 import traceback
 import typing
+import warnings
 from dataclasses import dataclass
 from functools import reduce
 from multiprocessing import synchronize
@@ -746,6 +747,14 @@ def execute_mp(
             # force kill the processes (only if they are refusing to terminate cleanly)
             for proc in processes:
                 proc.kill()
-                proc.join()
+                proc.join(30.0)
+
+                # if somehow, this force-kill process didn't work, and the process is left hanging,
+                # there should be at least some visiblity to the user if the process really still is running,
+                # so that logs can be searched to find hanging processes
+                if proc.is_alive():
+                    warnings.warn(
+                        f"Failed to join pipeline subprocess id: '{proc.pid}'"
+                    )
 
             raise err

@@ -21,6 +21,7 @@ from .test_utils import (
     process_parallelism_options,
     sleeper,
     thread_parallelism_options,
+    thread_in_process_parallelism_options,
 )
 
 
@@ -200,7 +201,11 @@ def test_main_process_signal(
     child_procs = psutil.Process(proc.pid).children()
 
     process_parallelism = set(process_parallelism_options)
-    if parallelism in process_parallelism:
+    if parallelism in thread_in_process_parallelism_options:
+        # there are 1 child processes we expect
+        # the container process that hosts all the worker threads
+        assert len(child_procs) == 1
+    elif parallelism in process_parallelism:
         # there are 3 child processes we expect
         # 1 generate_infinite process, 2 consume_infinite_ints processes
         assert len(child_procs) == 3
@@ -251,7 +256,11 @@ def test_single_worker_error(parallelism: ParallelismStrategy):
     if one process dies and the others do not, then it should still raise an exception,
     as the dead process might have consumed an important message
     """
-    mp_context = mp.get_context("spawn") if parallelism == "process-spawn" else mp
+    mp_context = (
+        mp.get_context("spawn")
+        if parallelism == "process-spawn" or parallelism == "thread-in-process-spawn"
+        else mp
+    )
     started_event = mp_context.Event()
     tasks = [
         PipelineTask(
@@ -297,6 +306,8 @@ def test_single_worker_unexpected_exit(parallelism: ParallelismStrategy):
     process_context_map: Dict[ParallelismStrategy, str] = {
         "process-fork": "fork",
         "process-spawn": "spawn",
+        "thread-in-process-fork": "fork",
+        "thread-in-process-spawn": "spawn",
     }
     ctx = mp.get_context(process_context_map[parallelism])
     started_event = ctx.Event()
@@ -360,4 +371,4 @@ def test_hang_message_passing_timeout(
 
 
 if __name__ == "__main__":
-    test_hang_message_passing_timeout(1000, "process-fork")
+    test_single_worker_error("process-fork")

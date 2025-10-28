@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-version = "0.5.0"
+version = "0.6.0"
 name = "pipeline_lib"
 description = "A streaming pipeline accelerator for Python"
 readme = "README.md"
@@ -53,7 +53,8 @@ profile = "black"
 disable = [
     "line-too-long", # We use black to control this.
     "logging-fstring-interpolation", # Logging in this repo is always fairly high severity, not an important rule
-    "missing-function-docstring", # TODO : REMOVE - TEMPORARY DURING INITIAL DEVELOPMENT
-    "missing-module-docstring", # TODO : REMOVE - TEMPORARY DURING INITIAL DEVELOPMENT
-    "missing-class-docstring", # TODO : REMOVE - TEMPORARY DURING INITIAL DEVELOPMENT
+    "duplicate-code", # copypasta is an intentional design choice meant to improve readbility and fine-grained control over each and every execution method to maximize efficiency and reliability over broad edits and refactors
+    "missing-function-docstring",
+    "missing-module-docstring",
+    "missing-class-docstring",
 ]
