@@ -74,7 +74,7 @@ class TaskOutput:
             self.packets_space.release()
 
             # store the updated time to register that progress was made in the pipeline
-            self.last_updated_time.value = time.time()
+            self.last_updated_time.value = time.monotonic()
 
     def put_results(self, iterable: Iterable[Any]):
         iterator = iter(iterable)
@@ -315,7 +315,7 @@ def execute_trp(
     err_queue = BufferedQueue(ERR_BUF_SIZE, n_total_tasks + 2, False, ctx)
 
     last_updated_times = [
-        ctx.Value("d", time.time(), lock=False) for _ in range(len(tasks) - 1)
+        ctx.Value("d", time.monotonic(), lock=False) for _ in range(len(tasks) - 1)
     ]
     subprocess = ctx.Process(
         target=execute_thread_queue_errors, args=[tasks, err_queue, last_updated_times]
@@ -341,9 +341,9 @@ def execute_trp(
                         float(last_updated_time.value)
                         for last_updated_time in last_updated_times
                     )
-                    if time.time() - last_updated_time > inactivity_timeout:
+                    if time.monotonic() - last_updated_time > inactivity_timeout:
                         raise InactivityError(
-                            f"Last updated time was {time.time() - last_updated_time}s ago, pipeline inactivity timeout is {inactivity_timeout}s."
+                            f"Last updated time was {time.monotonic() - last_updated_time}s ago, pipeline inactivity timeout is {inactivity_timeout}s."
                         )
 
                 task_name, task_err, traceback_str = (None, None, None)

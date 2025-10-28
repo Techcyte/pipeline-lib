@@ -431,7 +431,7 @@ class TaskOutput:
     ) -> None:
         # pylint: disable=too-many-arguments
         self.num_tasks_remaining = ctx.Value("i", num_upstream_tasks, lock=True)
-        self.last_updated_time = ctx.Value("d", time.time(), lock=False)
+        self.last_updated_time = ctx.Value("d", time.monotonic(), lock=False)
         self.queue_len = ctx.Semaphore(value=0)
         self.packets_space = ctx.Semaphore(value=packets_in_flight)
         # using a custom queue implementation rather than multiprocessing.queue
@@ -466,7 +466,7 @@ class TaskOutput:
             self.packets_space.release()
 
             # update last updated time
-            self.last_updated_time.value = time.time()
+            self.last_updated_time.value = time.monotonic()
 
     def put_results(self, iterable: Iterable[Any]):
         iterator = iter(iterable)
@@ -689,9 +689,9 @@ def execute_mp(
                     last_updated_time = max(
                         float(stream.last_updated_time.value) for stream in data_streams
                     )
-                    if time.time() - last_updated_time > inactivity_timeout:
+                    if time.monotonic() - last_updated_time > inactivity_timeout:
                         raise InactivityError(
-                            f"Last updated time was {time.time() - last_updated_time}s ago, pipeline inactivity timeout is {inactivity_timeout}s."
+                            f"Last updated time was {time.monotonic() - last_updated_time}s ago, pipeline inactivity timeout is {inactivity_timeout}s."
                         )
 
                 sentinel_set -= set(done_sentinels)

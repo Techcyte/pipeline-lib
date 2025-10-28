@@ -107,7 +107,7 @@ def benchmark_execution():
     for n_msgs, buf_size, msg_type in zip(num_messages, buffer_sizes, message_types):
         results = []
         for comb in parameter_combinations:
-            start_t = time.time()
+            start_t = time.monotonic()
             run_messages(
                 n_procs=comb.n_procs,
                 packets_in_flight=comb.packets_in_flight,
@@ -116,7 +116,7 @@ def benchmark_execution():
                 message_type=msg_type,
                 max_message_size=buf_size,
             )
-            end_t = time.time()
+            end_t = time.monotonic()
             results.append(end_t - start_t)
         max_val = min(results)
         buf_type = "pipe" if buf_size is None else "shared-mem"
