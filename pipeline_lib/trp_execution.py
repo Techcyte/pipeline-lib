@@ -1,12 +1,6 @@
 import contextlib
 import logging
-from multiprocessing.context import (
-    BaseContext,
-    ForkContext,
-    ForkProcess,
-    SpawnContext,
-    SpawnProcess,
-)
+import multiprocessing as mp
 import multiprocessing.connection as mp_connection
 import os
 import queue
@@ -18,9 +12,14 @@ import traceback
 import typing
 import warnings
 from collections import deque
-from threading import RLock, Semaphore, get_native_id
+from multiprocessing.context import (
+    ForkContext,
+    ForkProcess,
+    SpawnContext,
+    SpawnProcess,
+)
+from threading import RLock, Semaphore
 from typing import Any, Iterable, List, Optional, Set, Union
-import multiprocessing as mp
 
 from pipeline_lib.mp_execution import (
     ERR_BUF_SIZE,
@@ -41,6 +40,7 @@ class PropogateErr(RuntimeError):
 
 
 class TaskOutput:
+    # pylint: disable=too-many-instance-attributes
     def __init__(
         self,
         num_upstream_tasks: int,
@@ -226,7 +226,6 @@ def execute_thread_queue_errors(
     source_task = tasks[0]
     sink_task = tasks[-1]
     worker_tasks = tasks[1:-1]
-    clean_completed: Set[int] = set()
 
     # number of processes are of the producing task
     data_streams = [
@@ -276,10 +275,11 @@ def execute_thread_queue_errors(
             )
         )
 
-    for name, thread in threads:
+    for _name, thread in threads:
         thread.start()
 
-    for name, thread in threads:
+    for _name, thread in threads:
+        # its OK if these thread joins hang, the main thread can force-kill these untimed joins
         thread.join()
 
 
