@@ -23,6 +23,10 @@ process_parallelism_options: List[ParallelismStrategy] = [
     "process-spawn-threading",
     "process-fork-threading",
 ]
+thread_in_process_parallelism_options: List[ParallelismStrategy] = [
+    "process-spawn-threading",
+    "process-fork-threading",
+]
 
 
 def sleeper(vals: Iterable[int], sleep_time: float) -> Iterable[int]:

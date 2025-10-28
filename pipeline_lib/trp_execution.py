@@ -74,7 +74,7 @@ class TaskOutput:
             self.packets_space.release()
 
             # store the updated time to register that progress was made in the pipeline
-            self.last_updated_time = time.time()
+            self.last_updated_time.value = time.time()
 
     def put_results(self, iterable: Iterable[Any]):
         iterator = iter(iterable)
@@ -327,68 +327,69 @@ def execute_trp(
     with sighandler({signal.SIGINT, signal.SIGTERM}, [subprocess]):
         done_sentinels = None
         try:
-            done_sentinels = mp_connection.wait(
-                [subprocess.sentinel],
-                timeout=(
-                    None if inactivity_timeout is None else inactivity_timeout / 10
-                ),
-            )
-            last_updated_time = max(
-                float(last_updated_time.value)
-                for last_updated_time in last_updated_times
-            )
-            if inactivity_timeout is not None and not done_sentinels:
-                # this means the timeout ended,
-                # time to check all of the task outputs timers
-                last_updated_time = max(
-                    float(last_updated_time.value)
-                    for last_updated_time in last_updated_times
+            while not done_sentinels:
+                done_sentinels = mp_connection.wait(
+                    [subprocess.sentinel],
+                    timeout=(
+                        None if inactivity_timeout is None else inactivity_timeout / 10
+                    ),
                 )
-                if time.time() - last_updated_time > inactivity_timeout:
-                    raise InactivityError(
-                        f"Last updated time was {time.time() - last_updated_time}s ago, pipeline inactivity timeout is {inactivity_timeout}s."
+                if inactivity_timeout is not None and not done_sentinels:
+                    # this means the timeout ended,
+                    # time to check all of the task outputs timers
+                    last_updated_time = max(
+                        float(last_updated_time.value)
+                        for last_updated_time in last_updated_times
+                    )
+                    if time.time() - last_updated_time > inactivity_timeout:
+                        raise InactivityError(
+                            f"Last updated time was {time.time() - last_updated_time}s ago, pipeline inactivity timeout is {inactivity_timeout}s."
+                        )
+
+                task_name, task_err, traceback_str = (None, None, None)
+                try:
+                    # first entry on the error queue should hopefully be the original error, just raise that one single error
+                    (task_name, task_err, traceback_str), _ = err_queue.get()
+                except queue.Empty:
+                    # if the error queue is empty, then there is no error
+                    pass
+                if task_err is not None:
+                    # should only be at most one unique error, just raise it
+                    # the main error needs to be the main raise for type-based exception catching to work
+                    raise task_err from TaskError(
+                        f"Task; {task_name} errored\n{traceback_str}\n{task_err}"
                     )
 
-            if done_sentinels:
-                done_id = done_sentinels[0]
-                assert isinstance(
-                    done_id, int
-                ), f"mp_connection.wait returned unexpected type: {done_id}"
-                # for some reason needs a join, or the exitcode doesn't sync properly
-                # but it has already exited, so this should finish very quickly
-                subprocess.join()
-                if subprocess.exitcode is None:
-                    # unsure what could cause this, but we see it in production sometimes
-                    # when an instance is shutting down
-                    logger.warning("Child process joined with exitcode None.")
-                elif subprocess.exitcode != 0:
-                    # attempts to catch segfaults and other errors that cannot be caught by python (i.g. sigkill)
-                    raise TaskError(
-                        f"Process: {subprocess.name} exited with non-zero code {subprocess.exitcode}"
-                    )
-
-            try:
-                # first entry on the error queue should hopefully be the original error, just raise that one single error
-                (task_name, task_err, traceback_str), _ = err_queue.get()
-                # should only be at most one unique error, just raise it
-                # the main error needs to be the main raise for type-based exception catching to work
-                raise task_err from TaskError(
-                    f"Task; {task_name} errored\n{traceback_str}\n{task_err}"
-                )
-            except queue.Empty:
-                # if the error queue is empty, then there is no error
-                pass
+                if done_sentinels:
+                    done_id = done_sentinels[0]
+                    assert isinstance(
+                        done_id, int
+                    ), f"mp_connection.wait returned unexpected type: {done_id}"
+                    # for some reason needs a join, or the exitcode doesn't sync properly
+                    # but it has already exited, so this should finish very quickly
+                    subprocess.join()
+                    if subprocess.exitcode is None:
+                        # unsure what could cause this, but we see it in production sometimes
+                        # when an instance is shutting down
+                        logger.warning("Child process joined with exitcode None.")
+                    elif subprocess.exitcode != 0:
+                        # attempts to catch segfaults and other errors that cannot be caught by python (i.g. sigkill)
+                        raise TaskError(
+                            f"Process: {subprocess.name} exited with non-zero code {subprocess.exitcode}"
+                        )
 
         except BaseException as err:  # pylint: disable=broad-except
+
             # joins process as cleanup if they successfully exited
             # give them a decent amount of time to process their current task and exit cleanly
-            subprocess.join(timeout=15.0)
-            # escalate, send sigterm to process
-            subprocess.terminate()
-            # wait for terminate signal to propagate through the process
-            subprocess.join(timeout=5.0)
-            # force kill the process (only if they are refusing to terminate cleanly)
-            subprocess.kill()
-            subprocess.join()
+            if not subprocess.exitcode:
+                # escalate, send sigterm to process
+                subprocess.terminate()
+                # wait for terminate signal to propagate through the process
+                subprocess.join(timeout=5.0)
+            if not subprocess.exitcode:
+                # force kill the process (only if they are refusing to terminate cleanly)
+                subprocess.kill()
+                subprocess.join()
 
             raise err

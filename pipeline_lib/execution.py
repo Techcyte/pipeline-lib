@@ -8,7 +8,14 @@ from .seq_execution import execute_seq
 from .tr_execution import execute_tr
 from .trp_execution import execute_trp
 
-ParallelismStrategy = Literal["thread", "process-fork", "process-spawn", "process-fork-threading", "process-spawn-threading", "coroutine"]
+ParallelismStrategy = Literal[
+    "thread",
+    "process-fork",
+    "process-spawn",
+    "process-fork-threading",
+    "process-spawn-threading",
+    "coroutine",
+]
 
 # list of strings in ParallelismStrategy
 PARALLELISM_STRATEGIES: Tuple[str, ...] = get_args(ParallelismStrategy)
